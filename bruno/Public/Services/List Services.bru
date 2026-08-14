@@ -1,0 +1,27 @@
+meta {
+  name: List Services
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/services
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+tests {
+  test("returns the registered service in the service list", function () {
+    const body = res.getBody();
+
+    expect(res.getStatus()).to.equal(200);
+    expect(body).to.be.an("array");
+    expect(body[0].service_type).to.equal("core");
+    expect(body[0].name).to.equal("Kaeru Core");
+    expect(body.some((service) => service.id === bru.getVar("serviceId"))).to.equal(true);
+  });
+}

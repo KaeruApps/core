@@ -1,0 +1,37 @@
+meta {
+  name: Update Service
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{baseUrl}}/api/v1/services/{{serviceId}}
+  body: json
+  auth: none
+}
+
+headers {
+  Accept: application/json
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "public_url": "https://upload.example.com",
+    "native_apps_url": "https://upload-api.example.com",
+    "default_role_key": null,
+    "role_mappings": []
+  }
+}
+
+tests {
+  test("updates the service configuration", function () {
+    const body = res.getBody();
+  
+    expect(res.getStatus()).to.equal(200);
+    expect(body.id).to.equal(bru.getVar("serviceId"));
+    expect(body.public_url).to.equal("https://upload.example.com");
+    expect(body.default_role_key).to.equal(null);
+    expect(body.role_mappings).to.be.an("array").and.have.length(0);
+  });
+}

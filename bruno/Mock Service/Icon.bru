@@ -1,0 +1,23 @@
+meta {
+  name: Icon
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{mockServiceUrl}}/api/v1/system/icon
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: image/svg+xml
+}
+
+tests {
+  test("returns the Kaeru development icon", function () {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getHeader("content-type")).to.equal("image/svg+xml");
+    expect(res.getHeader("etag")).to.equal('"kaeru-development-icon"');
+  });
+}

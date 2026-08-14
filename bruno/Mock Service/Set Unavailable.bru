@@ -1,0 +1,31 @@
+meta {
+  name: Set Unavailable
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{mockServiceUrl}}/api/v1/dev/availability
+  body: json
+  auth: none
+}
+
+headers {
+  Accept: application/json
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "available": false
+  }
+}
+
+tests {
+  test("sets the mock service unavailable", function () {
+    const body = res.getBody();
+
+    expect(res.getStatus()).to.equal(200);
+    expect(body.available).to.equal(false);
+  });
+}

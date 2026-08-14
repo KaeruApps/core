@@ -13,11 +13,12 @@
     "db:up": "docker compose up -d --wait postgres",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f postgres",
-    "dev": "cd backend && go run ./cmd/server",
-    "dev:backend": "cd backend && go run ./cmd/server",
+    "dev": "cd backend && KAERU_DEV_AUTH=true go run .",
+    "dev:backend": "cd backend && KAERU_DEV_AUTH=true go run .",
+    "dev:mock-service": "cd backend && go run ./dev/mock-service",
     "dev:frontend": "npm run dev --workspace frontend",
     "build:frontend": "npm run build --workspace frontend",
-    "start": "cd backend && go run ./cmd/server",
+    "start": "cd backend && go run .",
     "test": "cd backend && go test ./..."
   },
   "engines": {

@@ -1,0 +1,26 @@
+meta {
+  name: Session
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/v1/session
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+tests {
+  test("returns the local development administrator", function () {
+    const body = res.getBody();
+
+    expect(res.getStatus()).to.equal(200);
+    expect(body.authenticated).to.equal(true);
+    expect(body.user.subject).to.equal("kaeru-development-user");
+    expect(body.user.service_roles.core).to.equal("admin");
+  });
+}

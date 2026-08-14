@@ -1,0 +1,26 @@
+meta {
+  name: Health
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/health
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+tests {
+  test("returns Core health", function () {
+    const body = res.getBody();
+  
+    expect(res.getStatus()).to.equal(200);
+    expect(body.available).to.equal(true);
+    expect(body.initialized).to.equal(true);
+    expect(body.development_mode).to.equal(true);
+  });
+}

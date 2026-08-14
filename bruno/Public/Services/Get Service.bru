@@ -1,0 +1,32 @@
+meta {
+  name: Get Service
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/v1/services/{{serviceId}}
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+tests {
+  test("returns the registered service configuration", function () {
+    const body = res.getBody();
+
+    expect(res.getStatus()).to.equal(200);
+    expect(body.id).to.equal(bru.getVar("serviceId"));
+    expect(body.name).to.equal("Upload Archiver");
+    expect(body.default_role_key).to.equal(null);
+    expect(body.roles).to.be.an("array");
+    expect(body.roles.map((role) => role.key)).to.include.members(["viewer", "editor", "admin"]);
+    expect(body.role_mappings).to.be.an("array");
+    expect(body.role_catalog.status).to.equal("fresh");
+    expect(body.role_catalog.stale).to.equal(false);
+    expect(body.role_catalog.refreshed_at).to.be.a("string");
+  });
+}

@@ -1,11 +1,11 @@
 meta {
-  name: Hello
+  name: Health
   type: http
   seq: 1
 }
 
 get {
-  url: {{baseUrl}}/api/hello
+  url: {{mockServiceUrl}}/api/v1/health
   body: none
   auth: none
 }
@@ -15,10 +15,10 @@ headers {
 }
 
 tests {
-  test("returns the Kaeru Core greeting", function () {
+  test("returns mock service health", function () {
     const body = res.getBody();
 
     expect(res.getStatus()).to.equal(200);
-    expect(body.message).to.equal("Hello from Kaeru Core!");
+    expect(body.available).to.be.a("boolean");
   });
 }

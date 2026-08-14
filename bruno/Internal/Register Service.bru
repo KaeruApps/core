@@ -1,0 +1,49 @@
+meta {
+  name: Register Service
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v1/internal/services/register
+  body: json
+  auth: none
+}
+
+headers {
+  Accept: application/json
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "service_type": "upload",
+    "instance_id": "{{$guid}}",
+    "name": "Upload Archiver",
+    "version": "0.1.0",
+    "internal_url": "http://localhost:3101"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() === 201) {
+    bru.setVar("serviceId", res.body.service_id);
+  }
+}
+
+tests {
+  test("registers a service and returns credentials", function () {
+    const body = res.getBody();
+
+    expect(res.getStatus()).to.equal(201);
+    expect(["created", "reattached"]).to.include(body.status);
+    expect(body.service_id).to.be.a("string").and.not.be.empty;
+    expect(body.service_token).to.be.a("string").and.not.be.empty;
+    expect(body.service_token.startsWith("kaeru_")).to.equal(true);
+    expect(body.database.host).to.equal("kaeru-postgres");
+    expect(body.database.port).to.equal(5432);
+    expect(body.database.database).to.equal("kaeru_upload");
+    expect(body.database.username).to.equal(body.database.database);
+    expect(body.database.password).to.be.a("string").and.not.be.empty;
+  });
+}

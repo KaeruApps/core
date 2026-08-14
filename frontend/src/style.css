@@ -14,6 +14,16 @@ body {
   margin: 0;
 }
 
+.development-mode-banner {
+  width: 100%;
+  padding: 6px 16px;
+  background: rgba(var(--v-theme-warning), 0.16);
+  color: rgb(var(--v-theme-warning));
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: center;
+}
+
 .v-application .app-brand,
 .v-application .app-brand:active,
 .v-application .app-brand:hover,
@@ -670,6 +680,33 @@ body {
   gap: 20px;
 }
 
+.service-state-message {
+  display: flex;
+  min-height: 72px;
+  margin: 0;
+  padding: 20px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+  border-radius: 8px;
+  color: rgba(var(--v-theme-on-surface), 0.68);
+}
+
+.service-state-message--error {
+  color: rgb(var(--v-theme-error));
+}
+
+.service-configuration-error {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(var(--v-theme-error), 0.45);
+  border-radius: 6px;
+  background: rgba(var(--v-theme-error), 0.1);
+  color: rgb(var(--v-theme-error));
+  font-size: 0.875rem;
+}
+
 .service-card {
   display: block;
   position: relative;
@@ -735,11 +772,15 @@ body {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: rgb(var(--v-theme-error));
+  background: rgba(var(--v-theme-on-surface), 0.45);
 }
 
 .service-card-status--online .service-card-status-dot {
   background: rgb(var(--v-theme-primary));
+}
+
+.service-card-status--offline .service-card-status-dot {
+  background: rgb(var(--v-theme-error));
 }
 
 .delete-service-dialog .v-card-title {

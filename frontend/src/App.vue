@@ -1,5 +1,22 @@
 <script setup>
 import { mdiFormatListBulleted } from "@mdi/js";
+import { onMounted, ref } from "vue";
+
+const developmentMode = ref(false);
+
+onMounted(async () => {
+  try {
+    const response = await fetch("/api/v1/health", {
+      headers: { Accept: "application/json" },
+    });
+    if (response.ok) {
+      const health = await response.json();
+      developmentMode.value = health.development_mode === true;
+    }
+  } catch {
+    // Availability errors are handled by the pages that depend on the API.
+  }
+});
 </script>
 
 <template>
@@ -30,6 +47,9 @@ import { mdiFormatListBulleted } from "@mdi/js";
     </v-app-bar>
 
     <v-main>
+      <div v-if="developmentMode" class="development-mode-banner" role="status">
+        Development mode: authentication is bypassed
+      </div>
       <router-view />
     </v-main>
   </v-app>

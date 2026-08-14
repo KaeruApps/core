@@ -1,0 +1,23 @@
+meta {
+  name: Get Service Icon
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/v1/services/{{serviceId}}/icon
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: image/png, image/svg+xml
+}
+
+tests {
+  test("returns the cached service icon", function () {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getHeader("content-type")).to.equal("image/svg+xml");
+    expect(res.getHeader("etag")).to.be.a("string").and.not.be.empty;
+  });
+}

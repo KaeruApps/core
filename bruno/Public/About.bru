@@ -1,0 +1,26 @@
+meta {
+  name: About
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/v1/about
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+tests {
+  test("returns Core application information", function () {
+    const body = res.getBody();
+
+    expect(res.getStatus()).to.equal(200);
+    expect(body.name).to.equal("Kaeru Core");
+    expect(body.version).to.be.a("string").and.not.be.empty;
+    expect(body.description).to.be.a("string").and.not.be.empty;
+  });
+}

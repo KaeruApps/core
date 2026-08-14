@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import {
   mdiBackupRestore,
   mdiChevronDown,
@@ -14,64 +14,16 @@ import defaultServiceIcon from "../assets/app-icon.svg";
 import emailNotificationIcon from "../assets/notification/email.png";
 import kaeruRelayNotificationIcon from "../assets/notification/kaeru-relay.png";
 
-const services = ref([
-  {
-    id: "kaeru-core",
-    name: "Core",
-    description: "Shared platform services and coordination",
-    iconUrl: null,
-    status: "online",
-    type: "service",
-    details: [
-      { label: "Version", value: "0.1.0" },
-      { label: "Internal URL", value: "http://kaeru-core:8080" },
-      { label: "Public URL", value: "https://core.kaeru.example" },
-      { label: "Database", value: "kaeru_core" },
-    ],
-  },
-  {
-    id: "kaeru-upload",
-    name: "Upload Archiver",
-    description: "File upload and archival",
-    iconUrl: null,
-    status: "online",
-    type: "service",
-    details: [
-      { label: "Version", value: "0.1.0" },
-      { label: "Internal URL", value: "http://kaeru-upload:8080" },
-      { label: "Public URL", value: "https://upload-archiver.kaeru.example" },
-      { label: "Database", value: "kaeru_upload" },
-    ],
-  },
-  {
-    id: "kaeru-timeline",
-    name: "Timeline",
-    description: "Location and personal timeline",
-    iconUrl: null,
-    status: "online",
-    type: "service",
-    details: [
-      { label: "Version", value: "0.1.0" },
-      { label: "Internal URL", value: "http://kaeru-timeline:8080" },
-      { label: "Public URL", value: "https://timeline.kaeru.example" },
-      { label: "Database", value: "kaeru_timeline" },
-    ],
-  },
-  {
-    id: "kaeru-relay",
-    name: "Relay",
-    description: "Notifications and cross-client transfers",
-    iconUrl: null,
-    status: "offline",
-    type: "service",
-    details: [
-      { label: "Version", value: "0.1.0" },
-      { label: "Internal URL", value: "http://kaeru-relay:8080" },
-      { label: "Public URL", value: "https://relay.kaeru.example" },
-      { label: "Database", value: "kaeru_relay" },
-    ],
-  },
-]);
+const services = ref([]);
+const servicesLoading = ref(true);
+const servicesError = ref("");
+
+const serviceDescriptions = {
+  core: "Shared platform services and coordination",
+  upload: "File upload and archival",
+  timeline: "Location and personal timeline",
+  relay: "Notifications and cross-client transfers",
+};
 
 const clients = ref([
   {
@@ -175,17 +127,33 @@ const availableBackups = [
   "2026-08-07-kaeru-platform-backup.tar.gz",
 ];
 
-const serviceRoleOptions = ["Viewer", "User", "Editor", "Administrator"];
-
 const serviceToDelete = ref(null);
 const showServiceDetails = ref(false);
 const serviceToConfigure = ref(null);
+const serviceConfigurationLoading = ref(false);
+const serviceConfigurationSaving = ref(false);
+const serviceConfigurationError = ref("");
+const serviceDeletionSaving = ref(false);
 const serviceConfigurationDraft = ref({
   applicationUrl: "",
   nativeClientsUrl: "",
   defaultUserRole: null,
   roleMappings: [],
 });
+const serviceRoleOptions = computed(() => {
+  const roles = serviceToConfigure.value?.roles ?? [];
+  return [
+    { title: "No Access", value: null },
+    ...roles
+      .filter((role) => role.active)
+      .map((role) => ({ title: role.name, value: role.key })),
+  ];
+});
+const serviceMappingRoleOptions = computed(() => (
+  (serviceToConfigure.value?.roles ?? [])
+    .filter((role) => role.active)
+    .map((role) => ({ title: role.name, value: role.key }))
+));
 const expandedUserId = ref(null);
 const userActionToConfirm = ref(null);
 const notificationServiceToEdit = ref(null);
@@ -225,19 +193,131 @@ const registeredClientApps = computed(() => [
   ...new Set(clients.value.flatMap((client) => client.registeredClients)),
 ]);
 let nextRoleMappingId = 1;
+let servicesRefreshTimer = null;
+
+function normalizeService(service) {
+  const isCore = service.service_type === "core";
+  const status = service.registration_status !== "registered"
+    ? "offline"
+    : service.availability_status ?? "unknown";
+  const details = [
+    { label: "Version", value: service.version },
+    { label: "Internal URL", value: service.internal_url },
+    { label: "Public URL", value: service.public_url || "Not configured" },
+  ];
+  if (service.native_apps_url) {
+    details.push({ label: "Native Clients URL", value: service.native_apps_url });
+  }
+  if (service.database_name) {
+    details.push({ label: "Database", value: service.database_name });
+  }
+  if (service.health_checked_at) {
+    details.push({
+      label: "Last health check",
+      value: new Date(service.health_checked_at).toLocaleString(),
+    });
+  }
+  if (service.health_error) {
+    details.push({ label: "Health issue", value: service.health_error });
+  }
+
+  return {
+    ...service,
+    description: serviceDescriptions[service.service_type]
+      ?? `${service.name} service`,
+    iconUrl: isCore ? defaultServiceIcon : `/api/v1/services/${encodeURIComponent(service.id)}/icon`,
+    iconFailed: false,
+    status,
+    type: "service",
+    details,
+  };
+}
+
+function serviceStatusLabel(status) {
+  if (status === "online") {
+    return "Online";
+  }
+  if (status === "offline") {
+    return "Offline";
+  }
+  return "Checking";
+}
+
+async function apiErrorMessage(response, fallback) {
+  try {
+    const body = await response.json();
+    return body.error?.message || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function mergeServices(updatedServices) {
+  const existingServices = new Map(
+    services.value.map((service) => [service.id, service]),
+  );
+  services.value = updatedServices.map((updated) => {
+    const normalized = normalizeService(updated);
+    const existing = existingServices.get(updated.id);
+    if (!existing) {
+      return normalized;
+    }
+    const iconFailed = existing.iconFailed;
+    Object.assign(existing, normalized, { iconFailed });
+    return existing;
+  });
+}
+
+async function loadServices(background = false) {
+  if (!background) {
+    servicesLoading.value = true;
+    servicesError.value = "";
+  }
+  try {
+    const response = await fetch("/api/v1/services", {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) {
+      throw new Error(await apiErrorMessage(response, "Unable to load services."));
+    }
+    mergeServices(await response.json());
+    servicesError.value = "";
+  } catch (error) {
+    if (!background) {
+      servicesError.value = error instanceof Error
+        ? error.message
+        : "Unable to load services.";
+    }
+  } finally {
+    if (!background) {
+      servicesLoading.value = false;
+    }
+  }
+}
+
+function refreshVisibleServices() {
+  if (document.visibilityState === "visible") {
+    loadServices(true);
+  }
+}
+
+function handleServiceIconError(service) {
+  service.iconFailed = true;
+}
 
 async function loadAbout() {
   aboutError.value = "";
   aboutLoading.value = true;
 
   try {
-    const response = await fetch("/api/settings/about");
+    const response = await fetch("/api/v1/about", {
+      headers: { Accept: "application/json" },
+    });
     if (!response.ok) {
-      throw new Error(`Request failed with status ${response.status}`);
+      throw new Error(await apiErrorMessage(response, "Unable to load application information."));
     }
 
-    const result = await response.json();
-    about.value = result.data;
+    about.value = await response.json();
   } catch {
     aboutError.value = "Unable to load application information.";
   } finally {
@@ -245,7 +325,19 @@ async function loadAbout() {
   }
 }
 
-onMounted(loadAbout);
+onMounted(() => {
+  loadServices();
+  loadAbout();
+  servicesRefreshTimer = window.setInterval(refreshVisibleServices, 15_000);
+  document.addEventListener("visibilitychange", refreshVisibleServices);
+});
+
+onUnmounted(() => {
+  if (servicesRefreshTimer !== null) {
+    window.clearInterval(servicesRefreshTimer);
+  }
+  document.removeEventListener("visibilitychange", refreshVisibleServices);
+});
 
 function openBackupConfiguration() {
   backupConfigurationDraft.value = {
@@ -305,25 +397,52 @@ function restoreSelectedBackup() {
   restoreBackupFile.value = null;
 }
 
-function openServiceConfiguration(service) {
-  const publicUrl = service.details.find(
-    (detail) => detail.label === "Public URL",
-  )?.value ?? "";
-  const configuration = service.configuration ?? {};
-
+async function openServiceConfiguration(service) {
   serviceToConfigure.value = service;
+  serviceConfigurationLoading.value = true;
+  serviceConfigurationError.value = "";
   serviceConfigurationDraft.value = {
-    applicationUrl: configuration.applicationUrl ?? publicUrl,
-    nativeClientsUrl: configuration.nativeClientsUrl ?? "",
-    defaultUserRole: configuration.defaultUserRole ?? null,
-    roleMappings: (configuration.roleMappings ?? []).map((mapping) => ({
-      ...mapping,
-    })),
+    applicationUrl: service.public_url ?? "",
+    nativeClientsUrl: service.native_apps_url ?? "",
+    defaultUserRole: null,
+    roleMappings: [],
   };
+
+  try {
+    const response = await fetch(`/api/v1/services/${encodeURIComponent(service.id)}`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) {
+      throw new Error(await apiErrorMessage(response, "Unable to load service configuration."));
+    }
+    const configuration = await response.json();
+    if (serviceToConfigure.value?.id !== service.id) {
+      return;
+    }
+    Object.assign(service, configuration);
+    serviceToConfigure.value = service;
+    serviceConfigurationDraft.value = {
+      applicationUrl: configuration.public_url ?? "",
+      nativeClientsUrl: configuration.native_apps_url ?? "",
+      defaultUserRole: configuration.default_role_key ?? null,
+      roleMappings: (configuration.role_mappings ?? []).map((mapping) => ({
+        id: `role-mapping-${nextRoleMappingId++}`,
+        role: mapping.role_key,
+        oidcGroups: mapping.oidc_groups.join(", "),
+      })),
+    };
+  } catch (error) {
+    serviceConfigurationError.value = error instanceof Error
+      ? error.message
+      : "Unable to load service configuration.";
+  } finally {
+    serviceConfigurationLoading.value = false;
+  }
 }
 
 function cancelServiceConfiguration() {
   serviceToConfigure.value = null;
+  serviceConfigurationError.value = "";
 }
 
 function addServiceRoleMapping() {
@@ -342,26 +461,58 @@ function removeServiceRoleMapping(mappingId) {
   );
 }
 
-function saveServiceConfiguration() {
+async function saveServiceConfiguration() {
   if (!serviceToConfigure.value) {
     return;
   }
-
-  serviceToConfigure.value.configuration = {
-    ...serviceConfigurationDraft.value,
-    roleMappings: serviceConfigurationDraft.value.roleMappings.map(
-      (mapping) => ({ ...mapping }),
-    ),
-  };
-
-  const publicUrl = serviceToConfigure.value.details.find(
-    (detail) => detail.label === "Public URL",
-  );
-  if (publicUrl) {
-    publicUrl.value = serviceConfigurationDraft.value.applicationUrl;
+  const roleMappings = [];
+  for (const mapping of serviceConfigurationDraft.value.roleMappings) {
+    const groups = [...new Set(mapping.oidcGroups
+      .split(",")
+      .map((group) => group.trim())
+      .filter(Boolean))];
+    if (!mapping.role || groups.length === 0) {
+      serviceConfigurationError.value = "Complete or remove each role mapping before saving.";
+      return;
+    }
+    roleMappings.push({ role_key: mapping.role, oidc_groups: groups });
   }
 
-  cancelServiceConfiguration();
+  serviceConfigurationSaving.value = true;
+  serviceConfigurationError.value = "";
+  try {
+    const response = await fetch(
+      `/api/v1/services/${encodeURIComponent(serviceToConfigure.value.id)}`,
+      {
+        method: "PUT",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          public_url: serviceConfigurationDraft.value.applicationUrl.trim(),
+          native_apps_url: serviceConfigurationDraft.value.nativeClientsUrl.trim() || null,
+          default_role_key: serviceToConfigure.value.service_type === "core"
+            ? null
+            : serviceConfigurationDraft.value.defaultUserRole,
+          role_mappings: roleMappings,
+        }),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(await apiErrorMessage(response, "Unable to save service configuration."));
+    }
+    const updated = await response.json();
+    const normalized = normalizeService(updated);
+    Object.assign(serviceToConfigure.value, normalized, { roles: updated.roles });
+    cancelServiceConfiguration();
+  } catch (error) {
+    serviceConfigurationError.value = error instanceof Error
+      ? error.message
+      : "Unable to save service configuration.";
+  } finally {
+    serviceConfigurationSaving.value = false;
+  }
 }
 
 function requestConfiguredServiceDeletion() {
@@ -372,12 +523,31 @@ function cancelConfiguredServiceDeletion() {
   serviceToDelete.value = null;
 }
 
-function confirmConfiguredServiceDeletion() {
-  services.value = services.value.filter(
-    (service) => service.id !== serviceToDelete.value?.id,
-  );
-  serviceToDelete.value = null;
-  cancelServiceConfiguration();
+async function confirmConfiguredServiceDeletion() {
+  if (!serviceToDelete.value) {
+    return;
+  }
+  serviceDeletionSaving.value = true;
+  try {
+    const response = await fetch(
+      `/api/v1/services/${encodeURIComponent(serviceToDelete.value.id)}/unregister`,
+      { method: "POST", headers: { Accept: "application/json" } },
+    );
+    if (!response.ok) {
+      throw new Error(await apiErrorMessage(response, "Unable to unregister the service."));
+    }
+    const unregistered = normalizeService(await response.json());
+    Object.assign(serviceToDelete.value, unregistered);
+    serviceToDelete.value = null;
+    cancelServiceConfiguration();
+  } catch (error) {
+    serviceConfigurationError.value = error instanceof Error
+      ? error.message
+      : "Unable to unregister the service.";
+    serviceToDelete.value = null;
+  } finally {
+    serviceDeletionSaving.value = false;
+  }
 }
 
 function formatRegisteredDevices(count) {
@@ -478,7 +648,19 @@ function sendNotificationTest() {
         </v-btn>
       </div>
 
-      <div class="service-card-grid">
+      <p v-if="servicesLoading" class="service-state-message">
+        Loading services…
+      </p>
+      <div v-else-if="servicesError" class="service-state-message service-state-message--error">
+        <span>{{ servicesError }}</span>
+        <v-btn color="primary" size="small" variant="text" @click="loadServices()">
+          Try again
+        </v-btn>
+      </div>
+      <p v-else-if="services.length === 0" class="service-state-message">
+        No services are registered.
+      </p>
+      <div v-else class="service-card-grid">
         <v-sheet
           v-for="service in services"
           :key="service.id"
@@ -498,21 +680,15 @@ function sendNotificationTest() {
             :class="['service-card-status', `service-card-status--${service.status}`]"
           >
             <span class="service-card-status-dot" aria-hidden="true" />
-            {{ service.status === "online" ? "Online" : "Offline" }}
+            {{ serviceStatusLabel(service.status) }}
           </div>
 
           <div class="service-card-summary">
             <img
-              v-if="service.type === 'service'"
-              :src="service.iconUrl || defaultServiceIcon"
+              :src="service.iconFailed ? defaultServiceIcon : service.iconUrl"
               alt=""
               class="service-card-icon"
-            />
-            <v-icon
-              v-else
-              :icon="service.icon"
-              class="service-card-icon"
-              color="primary"
+              @error="handleServiceIconError(service)"
             />
 
             <div>
@@ -548,8 +724,18 @@ function sendNotificationTest() {
         rounded="lg"
       >
         <form @submit.prevent="saveServiceConfiguration">
-          <v-card-title>Configure {{ serviceToConfigure.name }} Service</v-card-title>
+          <v-card-title>Configure {{ serviceToConfigure.name }}</v-card-title>
           <v-card-text class="service-configuration-fields">
+            <p
+              v-if="serviceConfigurationError"
+              class="service-configuration-error"
+              role="alert"
+            >
+              {{ serviceConfigurationError }}
+            </p>
+            <p v-if="serviceConfigurationLoading" class="service-state-message">
+              Loading configuration…
+            </p>
             <div class="service-configuration-field">
               <label for="service-application-url" class="service-field-label">
                 Application URL
@@ -561,6 +747,7 @@ function sendNotificationTest() {
                 id="service-application-url"
                 v-model="serviceConfigurationDraft.applicationUrl"
                 aria-describedby="service-application-url-help"
+                :disabled="serviceConfigurationLoading || serviceConfigurationSaving"
                 hide-details="auto"
                 placeholder="https://service.example.com"
                 type="url"
@@ -580,6 +767,7 @@ function sendNotificationTest() {
                 id="service-native-url"
                 v-model="serviceConfigurationDraft.nativeClientsUrl"
                 aria-describedby="service-native-url-help"
+                :disabled="serviceConfigurationLoading || serviceConfigurationSaving"
                 hide-details="auto"
                 placeholder="https://native.service.example.com"
                 type="url"
@@ -599,9 +787,10 @@ function sendNotificationTest() {
                 id="service-default-role"
                 v-model="serviceConfigurationDraft.defaultUserRole"
                 aria-describedby="service-default-role-help"
+                :disabled="serviceConfigurationLoading || serviceConfigurationSaving || serviceToConfigure.service_type === 'core'"
                 :items="serviceRoleOptions"
                 hide-details="auto"
-                placeholder="Choose a role"
+                placeholder="No Access"
                 variant="outlined"
               />
             </div>
@@ -634,13 +823,15 @@ function sendNotificationTest() {
               <div class="service-role-mapping-inputs">
                 <v-select
                   v-model="mapping.role"
-                  :items="serviceRoleOptions"
+                  :disabled="serviceConfigurationSaving"
+                  :items="serviceMappingRoleOptions"
                   hide-details="auto"
                   :placeholder="`${serviceToConfigure.name} role`"
                   variant="outlined"
                 />
                 <v-text-field
                   v-model="mapping.oidcGroups"
+                  :disabled="serviceConfigurationSaving"
                   hide-details="auto"
                   placeholder="OIDC groups (comma separated)"
                   variant="outlined"
@@ -651,6 +842,7 @@ function sendNotificationTest() {
             <v-btn
               class="add-role-mapping-button"
               color="primary"
+              :disabled="serviceConfigurationLoading || serviceConfigurationSaving"
               variant="text"
               @click="addServiceRoleMapping"
             >
@@ -660,18 +852,27 @@ function sendNotificationTest() {
           </v-card-text>
           <v-card-actions>
             <v-btn
-              v-if="serviceToConfigure.status === 'offline'"
+              v-if="serviceToConfigure.status === 'offline' && serviceToConfigure.registration_status === 'registered' && serviceToConfigure.service_type !== 'core'"
               color="error"
+              :disabled="serviceConfigurationSaving"
               variant="text"
               @click="requestConfiguredServiceDeletion"
             >
               Delete
             </v-btn>
             <v-spacer />
-            <v-btn variant="text" @click="cancelServiceConfiguration">
+            <v-btn :disabled="serviceConfigurationSaving" variant="text" @click="cancelServiceConfiguration">
               Cancel
             </v-btn>
-            <v-btn color="primary" type="submit" variant="flat">Save</v-btn>
+            <v-btn
+              color="primary"
+              :disabled="serviceConfigurationLoading"
+              :loading="serviceConfigurationSaving"
+              type="submit"
+              variant="flat"
+            >
+              Save
+            </v-btn>
           </v-card-actions>
         </form>
       </v-card>
@@ -696,6 +897,7 @@ function sendNotificationTest() {
           </v-btn>
           <v-btn
             color="error"
+            :loading="serviceDeletionSaving"
             variant="flat"
             @click="confirmConfiguredServiceDeletion"
           >
@@ -1011,7 +1213,7 @@ function sendNotificationTest() {
                 aria-describedby="notification-email-username-help"
                 :disabled="!notificationProviderDraft.enabled"
                 hide-details="auto"
-                placeholder="username"
+                placeholder="Username"
                 variant="outlined"
               />
             </div>
@@ -1044,7 +1246,7 @@ function sendNotificationTest() {
                 for="notification-email-from-address"
                 class="service-field-label"
               >
-                From address
+                From Address
               </label>
               <p
                 id="notification-email-from-address-help"

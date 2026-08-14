@@ -1,0 +1,26 @@
+{
+  "name": "kaeru-core",
+  "displayName": "Kaeru Core",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "description": "The shared foundation for the self-hosted Kaeru Platform.",
+  "type": "module",
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "db:up": "docker compose up -d --wait postgres",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f postgres",
+    "dev": "cd backend && go run ./cmd/server",
+    "dev:backend": "cd backend && go run ./cmd/server",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "build:frontend": "npm run build --workspace frontend",
+    "start": "cd backend && go run ./cmd/server",
+    "test": "cd backend && go test ./..."
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

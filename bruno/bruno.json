@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "Kaeru Core",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

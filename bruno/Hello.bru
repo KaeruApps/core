@@ -1,0 +1,24 @@
+meta {
+  name: Hello
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/hello
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+tests {
+  test("returns the Kaeru Core greeting", function () {
+    const body = res.getBody();
+
+    expect(res.getStatus()).to.equal(200);
+    expect(body.message).to.equal("Hello from Kaeru Core!");
+  });
+}

@@ -1,9 +1,12 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import {
+  mdiAlertCircleOutline,
+  mdiAlertOutline,
   mdiBackupRestore,
   mdiChevronDown,
   mdiChevronUp,
+  mdiCheck,
   mdiClose,
   mdiCogOutline,
   mdiDatabaseArrowUpOutline,
@@ -11,12 +14,18 @@ import {
   mdiPlus,
 } from "@mdi/js";
 import defaultServiceIcon from "../assets/app-icon.svg";
+import defaultUserIcon from "../assets/default-user.png";
 import emailNotificationIcon from "../assets/notification/email.png";
-import kaeruRelayNotificationIcon from "../assets/notification/kaeru-relay.png";
+import kaeruNotificationsIcon from "../assets/notification/kaeru-notifications.png";
+import oidcFallbackIcon from "../assets/oidc.png";
+import OIDCConfigurationForm from "../components/OIDCConfigurationForm.vue";
+import { apiFetch } from "../api.js";
 
 const services = ref([]);
 const servicesLoading = ref(true);
 const servicesError = ref("");
+const servicesSection = ref(null);
+const coreAdminVerificationStatus = ref(null);
 
 const serviceDescriptions = {
   core: "Shared platform services and coordination",
@@ -25,64 +34,16 @@ const serviceDescriptions = {
   relay: "Notifications and cross-client transfers",
 };
 
-const clients = ref([
-  {
-    id: "alex-morgan",
-    name: "Alex Morgan",
-    disabled: false,
-    registeredDeviceCount: 2,
-    registeredClients: ["Kaeru for Android", "Kaeru Desktop"],
-    oidcGroups: ["kaeru-users", "media-admins"],
-    access: [
-      { service: "Core", level: "Administrator" },
-      { service: "Upload Archiver", level: "Editor" },
-      { service: "Timeline", level: "Editor" },
-      { service: "Relay", level: "User" },
-    ],
-    lastUsed: "Today at 14:32",
-    lastUsedAt: "2026-08-09T14:32:00+02:00",
-  },
-  {
-    id: "jamie-chen",
-    name: "Jamie Chen",
-    disabled: false,
-    registeredDeviceCount: 1,
-    registeredClients: ["Kaeru for iOS"],
-    oidcGroups: ["kaeru-users", "timeline-viewers"],
-    access: [
-      { service: "Core", level: "User" },
-      { service: "Upload Archiver", level: "User" },
-      { service: "Timeline", level: "Viewer" },
-      { service: "Relay", level: "User" },
-    ],
-    lastUsed: "Yesterday at 21:08",
-    lastUsedAt: "2026-08-08T21:08:00+02:00",
-  },
-  {
-    id: "sam-rivera",
-    name: "Sam Rivera",
-    disabled: true,
-    registeredDeviceCount: 0,
-    registeredClients: [],
-    oidcGroups: ["kaeru-guests"],
-    access: [
-      { service: "Core", level: "Viewer" },
-      { service: "Upload Archiver", level: "Viewer" },
-      { service: "Timeline", level: "No access" },
-      { service: "Relay", level: "No access" },
-    ],
-    lastUsed: "August 7 at 09:15",
-    lastUsedAt: "2026-08-07T09:15:00+02:00",
-  },
-]);
+const clients = ref([]);
+const usersLoading = ref(true);
+const usersError = ref("");
 
 const notificationServices = ref([
   {
-    id: "kaeru-relay",
-    name: "Kaeru Relay",
-    iconUrl: kaeruRelayNotificationIcon,
+    id: "kaeru-notifications",
+    name: "Kaeru Notifications",
+    iconUrl: kaeruNotificationsIcon,
     enabled: false,
-    url: "",
   },
   {
     id: "email",
@@ -105,6 +66,7 @@ const backupSummary = {
   size: "128.4 MB",
   path: "/backups/kaeru/",
   file: "2026-08-09-kaeru-platform-backup.tar.gz",
+  fileSize: "3.28 MB",
   schedule: "Every day",
   scheduledTime: "02:00",
   automatic: "Enabled",
@@ -172,6 +134,52 @@ const testClientApp = ref(null);
 const about = ref(null);
 const aboutError = ref("");
 const aboutLoading = ref(true);
+const oidcSettings = ref(null);
+const oidcSettingsExpanded = ref(false);
+const oidcSettingsLoading = ref(true);
+const oidcSettingsSaving = ref(false);
+const oidcSettingsSaved = ref(false);
+const oidcSettingsClosing = ref(false);
+const oidcSettingsError = ref("");
+const oidcSettingsErrorElement = ref(null);
+const oidcConfigurationCard = ref(null);
+const oidcSettingsBaseline = ref(null);
+const oidcVerificationDialog = ref(false);
+const oidcVerificationChanges = ref([]);
+const oidcVerificationSource = ref("oidc");
+const oidcVerificationStarting = ref(false);
+const oidcVerificationStatus = ref(null);
+const oidcImageFailed = ref(false);
+const oidcImageVersion = ref(Date.now());
+const oidcButtonImage = ref(null);
+const oidcSettingsDraft = ref({
+  name: "",
+  accessUrls: [],
+  issuerUrl: "",
+  clientId: "",
+  clientSecret: "",
+  additionalScopes: "",
+  usernameClaim: "",
+  displayNameClaim: "",
+  avatarClaim: "",
+  groupsClaim: "",
+  adminGroups: "",
+  buttonText: "",
+});
+const oidcSummaryIcon = computed(() => (
+  oidcSettings.value?.button_image_configured && !oidcImageFailed.value
+    ? `/api/v1/oidc/settings/button-image?v=${oidcImageVersion.value}`
+    : oidcFallbackIcon
+));
+let oidcSavedTimer = null;
+let oidcCloseTimer = null;
+let oidcVerificationStatusTimer = null;
+let coreAdminVerificationStatusTimer = null;
+const oidcVerificationDraftKey = "kaeru.oidc-settings-verification-draft";
+const oidcVerificationMetadataKey = "kaeru.oidc-settings-verification-metadata";
+const oidcVerificationRevokesSessions = computed(() => (
+  oidcVerificationChanges.value.some((change) => change !== "Admin Groups")
+));
 const backupConfigurationOpen = ref(false);
 const downloadBackupOpen = ref(false);
 const selectedBackup = ref(backupSummary.file);
@@ -206,14 +214,14 @@ function normalizeService(service) {
     { label: "Public URL", value: service.public_url || "Not configured" },
   ];
   if (service.native_apps_url) {
-    details.push({ label: "Native Clients URL", value: service.native_apps_url });
+    details.push({ label: "Native URL", value: service.native_apps_url });
   }
   if (service.database_name) {
     details.push({ label: "Database", value: service.database_name });
   }
   if (service.health_checked_at) {
     details.push({
-      label: "Last health check",
+      label: "Health check",
       value: new Date(service.health_checked_at).toLocaleString(),
     });
   }
@@ -274,7 +282,7 @@ async function loadServices(background = false) {
     servicesError.value = "";
   }
   try {
-    const response = await fetch("/api/v1/services", {
+    const response = await apiFetch("/api/v1/services", {
       headers: { Accept: "application/json" },
     });
     if (!response.ok) {
@@ -298,6 +306,47 @@ async function loadServices(background = false) {
 function refreshVisibleServices() {
   if (document.visibilityState === "visible") {
     loadServices(true);
+  }
+}
+
+function normalizeUser(user) {
+  const registeredDevices = user.registered_devices ?? [];
+  const lastSeenAt = user.last_seen_at ?? null;
+  return {
+    id: user.id,
+    name: user.display_name || user.username,
+    username: user.username,
+    email: user.email,
+    avatarUrl: user.avatar_url || defaultUserIcon,
+    avatarFailed: false,
+    disabled: user.disabled,
+    registeredDeviceCount: registeredDevices.length,
+    registeredClients: registeredDevices.map((device) => device.name),
+    oidcGroups: user.oidc_groups ?? [],
+    access: (user.access ?? []).map((access) => ({
+      service: access.service_name,
+      level: access.role_name,
+    })),
+    lastUsed: lastSeenAt ? new Date(lastSeenAt).toLocaleString() : "Never",
+    lastUsedAt: lastSeenAt,
+  };
+}
+
+async function loadUsers() {
+  usersLoading.value = true;
+  usersError.value = "";
+  try {
+    const response = await apiFetch("/api/v1/users", {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) {
+      throw new Error(await apiErrorMessage(response, "Unable to load users."));
+    }
+    clients.value = (await response.json()).map(normalizeUser);
+  } catch (error) {
+    usersError.value = error instanceof Error ? error.message : "Unable to load users.";
+  } finally {
+    usersLoading.value = false;
   }
 }
 
@@ -325,8 +374,266 @@ async function loadAbout() {
   }
 }
 
-onMounted(() => {
+function applyOIDCSettings(settings) {
+  oidcSettings.value = settings;
+  oidcImageFailed.value = false;
+  const publicUrl = settings.public_url ?? "";
+  const accessUrls = (settings.access_urls ?? [])
+    .filter((accessUrl) => accessUrl && accessUrl !== publicUrl);
+  oidcSettingsDraft.value = {
+    name: settings.name,
+    accessUrls: [publicUrl, ...accessUrls],
+    issuerUrl: settings.issuer_url,
+    clientId: settings.client_id,
+    clientSecret: "",
+    additionalScopes: (settings.additional_scopes ?? []).join(" "),
+    usernameClaim: settings.username_claim,
+    displayNameClaim: settings.display_name_claim ?? "",
+    avatarClaim: settings.avatar_claim ?? "",
+    groupsClaim: settings.groups_claim,
+    adminGroups: (settings.admin_groups ?? []).join(", "),
+    buttonText: settings.button_text,
+  };
+  oidcSettingsBaseline.value = JSON.parse(JSON.stringify(oidcSettingsDraft.value));
+}
+
+function normalizedValues(value, separator = /[\s,]+/) {
+  return [...new Set(value.split(separator).map((item) => item.trim()).filter(Boolean))].sort();
+}
+
+function oidcAuthenticationChanges() {
+  const current = oidcSettingsBaseline.value;
+  const draft = oidcSettingsDraft.value;
+  if (!current) return [];
+  const changes = [];
+  if (draft.issuerUrl.trim() !== current.issuerUrl.trim()) changes.push("Issuer URL");
+  if (draft.clientId.trim() !== current.clientId.trim()) changes.push("Client ID");
+  if (draft.clientSecret) changes.push("Client Secret");
+  if (JSON.stringify(normalizedValues(draft.additionalScopes, /\s+/)) !== JSON.stringify(normalizedValues(current.additionalScopes, /\s+/))) changes.push("Additional Scopes");
+  if (draft.usernameClaim.trim() !== current.usernameClaim.trim()) changes.push("Username Claim");
+  if (draft.groupsClaim.trim() !== current.groupsClaim.trim()) changes.push("Groups Claim");
+  if (JSON.stringify(normalizedValues(draft.adminGroups)) !== JSON.stringify(normalizedValues(current.adminGroups))) changes.push("Admin Groups");
+  if (JSON.stringify(draft.accessUrls.map((url) => url.trim()).filter(Boolean)) !== JSON.stringify(current.accessUrls.map((url) => url.trim()).filter(Boolean))) changes.push("Access URLs");
+  return changes;
+}
+
+function buildOIDCSettingsForm() {
+  const form = new FormData();
+  const draft = oidcSettingsDraft.value;
+  form.set("name", draft.name);
+  form.set("access_urls", draft.accessUrls.join(","));
+  form.set("issuer_url", draft.issuerUrl);
+  form.set("client_id", draft.clientId);
+  form.set("client_secret", draft.clientSecret);
+  form.set("additional_scopes", draft.additionalScopes);
+  form.set("username_claim", draft.usernameClaim);
+  form.set("display_name_claim", draft.displayNameClaim);
+  form.set("avatar_claim", draft.avatarClaim);
+  form.set("groups_claim", draft.groupsClaim);
+  form.set("admin_groups", draft.adminGroups);
+  form.set("button_text", draft.buttonText);
+  const image = Array.isArray(oidcButtonImage.value) ? oidcButtonImage.value[0] : oidcButtonImage.value;
+  if (image) form.set("button_image", image);
+  return form;
+}
+
+async function scrollToOIDCSettingsError() {
+  await nextTick();
+  oidcSettingsErrorElement.value?.scrollIntoView({
+    behavior: "smooth",
+    block: "center",
+  });
+}
+
+function clearOIDCSettingsMessages() {
+  oidcSettingsError.value = "";
+  oidcVerificationStatus.value = null;
+  if (oidcVerificationStatusTimer !== null) {
+    window.clearTimeout(oidcVerificationStatusTimer);
+    oidcVerificationStatusTimer = null;
+  }
+}
+
+async function loadOIDCSettings() {
+  oidcSettingsLoading.value = true;
+  oidcSettingsError.value = "";
+  try {
+    const response = await apiFetch("/api/v1/oidc/settings", {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) {
+      throw new Error(await apiErrorMessage(response, "Unable to load OIDC settings."));
+    }
+    applyOIDCSettings(await response.json());
+    oidcImageVersion.value = Date.now();
+  } catch (error) {
+    oidcSettingsError.value = error instanceof Error
+      ? error.message
+      : "Unable to load OIDC settings.";
+  } finally {
+    oidcSettingsLoading.value = false;
+  }
+}
+
+async function saveOIDCSettings() {
+  clearOIDCSettingsMessages();
+  const authenticationChanges = oidcAuthenticationChanges();
+  if (authenticationChanges.length > 0) {
+    oidcVerificationSource.value = "oidc";
+    oidcVerificationChanges.value = authenticationChanges;
+    oidcVerificationDialog.value = true;
+    return;
+  }
+  oidcSettingsSaving.value = true;
+  oidcSettingsSaved.value = false;
+  oidcSettingsError.value = "";
+  const form = buildOIDCSettingsForm();
+
+  try {
+    const response = await apiFetch("/api/v1/oidc/settings", {
+      method: "PUT",
+      headers: { Accept: "application/json" },
+      body: form,
+    });
+    if (!response.ok) {
+      throw new Error(await apiErrorMessage(response, "Unable to save OIDC settings."));
+    }
+    applyOIDCSettings(await response.json());
+    oidcImageVersion.value = Date.now();
+    oidcButtonImage.value = null;
+    oidcSettingsSaved.value = true;
+    if (oidcSavedTimer !== null) window.clearTimeout(oidcSavedTimer);
+    oidcSavedTimer = window.setTimeout(() => {
+      oidcSettingsSaved.value = false;
+      oidcSavedTimer = null;
+    }, 2500);
+  } catch (error) {
+    oidcSettingsError.value = error instanceof Error
+      ? error.message
+      : "Unable to save OIDC settings.";
+    await scrollToOIDCSettingsError();
+  } finally {
+    oidcSettingsSaving.value = false;
+  }
+}
+
+function cancelOIDCVerification() {
+  oidcVerificationDialog.value = false;
+}
+
+async function startOIDCVerification() {
+  oidcVerificationStarting.value = true;
+  oidcSettingsError.value = "";
+  try {
+    const response = await apiFetch("/api/v1/oidc/settings/verify", {
+      method: "POST", headers: { Accept: "application/json" }, body: buildOIDCSettingsForm(),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error?.message || "OIDC verification could not be started.");
+    window.sessionStorage.setItem(oidcVerificationDraftKey, JSON.stringify(oidcSettingsDraft.value));
+    window.sessionStorage.setItem(oidcVerificationMetadataKey, JSON.stringify({
+      source: oidcVerificationSource.value,
+      revokesSessions: oidcVerificationRevokesSessions.value,
+    }));
+    window.location.assign(body.authorization_url);
+  } catch (error) {
+    oidcVerificationStarting.value = false;
+    oidcVerificationDialog.value = false;
+    oidcSettingsError.value = error instanceof Error ? error.message : "OIDC verification could not be started.";
+    await scrollToOIDCSettingsError();
+  }
+}
+
+async function handleOIDCVerificationReturn() {
+  const query = new URLSearchParams(window.location.search);
+  const result = query.get("oidc_verification");
+  if (!result) return;
+  let verificationMetadata = null;
+  try {
+    const savedMetadata = window.sessionStorage.getItem(oidcVerificationMetadataKey);
+    if (savedMetadata) verificationMetadata = JSON.parse(savedMetadata);
+  } catch { /* Use the conservative default message if metadata is unavailable. */ }
+  const coreAdminVerification = verificationMetadata?.source === "core-admin";
+  if (!coreAdminVerification) oidcSettingsExpanded.value = true;
+  if (result === "success") {
+    window.sessionStorage.removeItem(oidcVerificationDraftKey);
+    if (coreAdminVerification) {
+      coreAdminVerificationStatus.value = {
+        type: "success",
+        message: "Core administrator access changes verified and saved. Existing sessions remain signed in.",
+      };
+    } else {
+      oidcVerificationStatus.value = {
+        type: "success",
+        message: verificationMetadata?.revokesSessions === false
+          ? "OIDC settings verified and saved. Existing sessions remain signed in."
+          : "OIDC settings verified and saved. All existing sessions have been revoked.",
+      };
+      oidcVerificationStatusTimer = window.setTimeout(() => { oidcVerificationStatus.value = null; }, 5000);
+    }
+  } else {
+    if (!coreAdminVerification) {
+      try {
+        const saved = window.sessionStorage.getItem(oidcVerificationDraftKey);
+        if (saved) oidcSettingsDraft.value = JSON.parse(saved);
+      } catch { /* Keep the active configuration if the draft cannot be restored. */ }
+    }
+    window.sessionStorage.removeItem(oidcVerificationDraftKey);
+    const failureStatus = {
+      type: "error",
+      message: coreAdminVerification
+        ? "Core administrator access changes could not be verified. Your existing access configuration remains active."
+        : "OIDC settings could not be verified. Your existing configuration remains active.",
+      detail: query.get("error") || "Please review the proposed settings and try again.",
+    };
+    if (coreAdminVerification) coreAdminVerificationStatus.value = failureStatus;
+    else oidcVerificationStatus.value = failureStatus;
+  }
+  if (coreAdminVerification) {
+    if (coreAdminVerificationStatusTimer !== null) {
+      window.clearTimeout(coreAdminVerificationStatusTimer);
+    }
+    coreAdminVerificationStatusTimer = window.setTimeout(() => {
+      coreAdminVerificationStatus.value = null;
+      coreAdminVerificationStatusTimer = null;
+    }, 5000);
+  }
+  window.sessionStorage.removeItem(oidcVerificationMetadataKey);
+  window.history.replaceState({}, "", window.location.pathname);
+  await nextTick();
+  const returnTarget = coreAdminVerification
+    ? servicesSection.value
+    : oidcConfigurationCard.value;
+  returnTarget?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function closeOIDCSettings() {
+  clearOIDCSettingsMessages();
+  if (oidcSettingsClosing.value) return;
+
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduceMotion || !oidcConfigurationCard.value) {
+    oidcSettingsExpanded.value = false;
+    return;
+  }
+
+  oidcSettingsClosing.value = true;
+  oidcConfigurationCard.value.scrollIntoView({
+    behavior: "smooth",
+    block: "start",
+  });
+  oidcCloseTimer = window.setTimeout(() => {
+    oidcSettingsExpanded.value = false;
+    oidcSettingsClosing.value = false;
+    oidcCloseTimer = null;
+  }, 500);
+}
+
+onMounted(async () => {
   loadServices();
+  loadUsers();
+  await loadOIDCSettings();
+  await handleOIDCVerificationReturn();
   loadAbout();
   servicesRefreshTimer = window.setInterval(refreshVisibleServices, 15_000);
   document.addEventListener("visibilitychange", refreshVisibleServices);
@@ -335,6 +642,16 @@ onMounted(() => {
 onUnmounted(() => {
   if (servicesRefreshTimer !== null) {
     window.clearInterval(servicesRefreshTimer);
+  }
+  if (oidcSavedTimer !== null) {
+    window.clearTimeout(oidcSavedTimer);
+  }
+  if (oidcCloseTimer !== null) {
+    window.clearTimeout(oidcCloseTimer);
+  }
+  if (oidcVerificationStatusTimer !== null) window.clearTimeout(oidcVerificationStatusTimer);
+  if (coreAdminVerificationStatusTimer !== null) {
+    window.clearTimeout(coreAdminVerificationStatusTimer);
   }
   document.removeEventListener("visibilitychange", refreshVisibleServices);
 });
@@ -409,7 +726,7 @@ async function openServiceConfiguration(service) {
   };
 
   try {
-    const response = await fetch(`/api/v1/services/${encodeURIComponent(service.id)}`, {
+    const response = await apiFetch(`/api/v1/services/${encodeURIComponent(service.id)}`, {
       headers: { Accept: "application/json" },
     });
     if (!response.ok) {
@@ -461,6 +778,13 @@ function removeServiceRoleMapping(mappingId) {
   );
 }
 
+function groupsForServiceRole(mappings, roleKey) {
+  return [...new Set((mappings ?? [])
+    .filter((mapping) => mapping.role_key === roleKey)
+    .flatMap((mapping) => mapping.oidc_groups ?? []))]
+    .sort();
+}
+
 async function saveServiceConfiguration() {
   if (!serviceToConfigure.value) {
     return;
@@ -478,10 +802,25 @@ async function saveServiceConfiguration() {
     roleMappings.push({ role_key: mapping.role, oidc_groups: groups });
   }
 
+  const isCore = serviceToConfigure.value.service_type === "core";
+  const proposedCoreAdminGroups = groupsForServiceRole(roleMappings, "admin");
+  const currentCoreAdminGroups = groupsForServiceRole(
+    serviceToConfigure.value.role_mappings,
+    "admin",
+  );
+  const coreAdminGroupsChanged = isCore && JSON.stringify(proposedCoreAdminGroups)
+    !== JSON.stringify(currentCoreAdminGroups);
+  const mappingsToSave = coreAdminGroupsChanged
+    ? (serviceToConfigure.value.role_mappings ?? []).map((mapping) => ({
+      role_key: mapping.role_key,
+      oidc_groups: [...mapping.oidc_groups],
+    }))
+    : roleMappings;
+
   serviceConfigurationSaving.value = true;
   serviceConfigurationError.value = "";
   try {
-    const response = await fetch(
+    const response = await apiFetch(
       `/api/v1/services/${encodeURIComponent(serviceToConfigure.value.id)}`,
       {
         method: "PUT",
@@ -495,7 +834,7 @@ async function saveServiceConfiguration() {
           default_role_key: serviceToConfigure.value.service_type === "core"
             ? null
             : serviceConfigurationDraft.value.defaultUserRole,
-          role_mappings: roleMappings,
+          role_mappings: mappingsToSave,
         }),
       },
     );
@@ -505,7 +844,17 @@ async function saveServiceConfiguration() {
     const updated = await response.json();
     const normalized = normalizeService(updated);
     Object.assign(serviceToConfigure.value, normalized, { roles: updated.roles });
+    if (updated.service_type === "core") {
+      await loadOIDCSettings();
+    }
     cancelServiceConfiguration();
+    if (coreAdminGroupsChanged) {
+      oidcSettingsDraft.value.adminGroups = proposedCoreAdminGroups.join(", ");
+      oidcSettingsExpanded.value = true;
+      oidcVerificationSource.value = "core-admin";
+      oidcVerificationChanges.value = ["Admin Groups"];
+      oidcVerificationDialog.value = true;
+    }
   } catch (error) {
     serviceConfigurationError.value = error instanceof Error
       ? error.message
@@ -529,7 +878,7 @@ async function confirmConfiguredServiceDeletion() {
   }
   serviceDeletionSaving.value = true;
   try {
-    const response = await fetch(
+    const response = await apiFetch(
       `/api/v1/services/${encodeURIComponent(serviceToDelete.value.id)}/unregister`,
       { method: "POST", headers: { Accept: "application/json" } },
     );
@@ -552,10 +901,10 @@ async function confirmConfiguredServiceDeletion() {
 
 function formatRegisteredDevices(count) {
   if (!count) {
-    return "No registered client applications";
+    return "No registered devices";
   }
 
-  return `${count} registered client ${count === 1 ? "application" : "applications"}`;
+  return `${count} registered ${count === 1 ? "device" : "devices"}`;
 }
 
 function toggleUserDetails(userId) {
@@ -589,7 +938,6 @@ function openNotificationServiceEditor(notificationService) {
   notificationServiceToEdit.value = notificationService;
   notificationProviderDraft.value = {
     enabled: notificationService.enabled,
-    url: notificationService.url ?? "",
     host: notificationService.host ?? "",
     port: notificationService.port ?? null,
     username: notificationService.username ?? "",
@@ -631,21 +979,53 @@ function sendNotificationTest() {
 
 <template>
   <v-container class="page-content">
-    <section aria-labelledby="services-title" class="home-section">
-      <div class="home-section-header">
-        <h1 id="services-title" class="home-section-title">Services</h1>
+    <section ref="servicesSection" aria-labelledby="services-title" class="home-section">
+      <div class="home-section-header home-section-header--stacked">
+        <div class="home-section-heading">
+          <div class="home-section-title-row">
+            <h1 id="services-title" class="home-section-title">Services</h1>
+            <v-btn
+              :aria-expanded="showServiceDetails"
+              color="primary"
+              variant="text"
+              @click="showServiceDetails = !showServiceDetails"
+            >
+              {{ showServiceDetails ? "Less Details" : "More Details" }}
+              <v-icon
+                :icon="showServiceDetails ? mdiChevronUp : mdiChevronDown"
+                end
+              />
+            </v-btn>
+          </div>
+          <p class="home-section-subtitle">
+            Configure URLs and access for Kaeru Services. Any Kaeru service you
+            install will automatically appear here.
+          </p>
+        </div>
+      </div>
+
+      <div
+        v-if="coreAdminVerificationStatus"
+        :class="[
+          'oidc-verification-status',
+          'core-admin-verification-status',
+          `oidc-verification-status--${coreAdminVerificationStatus.type}`,
+        ]"
+        role="status"
+      >
+        <v-icon :icon="coreAdminVerificationStatus.type === 'success' ? mdiCheck : mdiAlertCircleOutline" />
+        <div>
+          <strong>{{ coreAdminVerificationStatus.message }}</strong>
+          <p v-if="coreAdminVerificationStatus.detail">{{ coreAdminVerificationStatus.detail }}</p>
+        </div>
         <v-btn
-          :aria-expanded="showServiceDetails"
-          color="primary"
+          aria-label="Dismiss message"
+          :icon="mdiClose"
+          size="small"
+          type="button"
           variant="text"
-          @click="showServiceDetails = !showServiceDetails"
-        >
-          {{ showServiceDetails ? "Less Details" : "More Details" }}
-          <v-icon
-            :icon="showServiceDetails ? mdiChevronUp : mdiChevronDown"
-            end
-          />
-        </v-btn>
+          @click="coreAdminVerificationStatus = null"
+        />
       </div>
 
       <p v-if="servicesLoading" class="service-state-message">
@@ -777,7 +1157,7 @@ function sendNotificationTest() {
 
             <div class="service-configuration-field">
               <label for="service-default-role" class="service-field-label">
-                Default user role
+                Default User Role
               </label>
               <p id="service-default-role-help" class="service-field-help">
                 Default access level for users not belonging to a higher access
@@ -805,7 +1185,7 @@ function sendNotificationTest() {
                   <p class="service-field-label">Role Mapping {{ index + 1 }}</p>
                   <p class="service-field-help">
                     Choose OIDC groups which grant access to
-                    {{ serviceToConfigure.name }} roles
+                    {{ serviceToConfigure.name }} roles, comma separated for multiple groups
                   </p>
                 </div>
                 <v-btn
@@ -909,10 +1289,26 @@ function sendNotificationTest() {
 
     <section aria-labelledby="users-title" class="home-section clients-section">
       <div class="home-section-header">
-        <h2 id="users-title" class="home-section-title">Users</h2>
+        <div class="home-section-heading">
+          <h2 id="users-title" class="home-section-title">Users</h2>
+          <p class="home-section-subtitle">
+            View user info and access permissions, enable or disable users, or force user
+            logout.
+          </p>
+        </div>
       </div>
 
-      <div class="client-list">
+      <p v-if="usersLoading" class="service-state-message">Loading users…</p>
+      <div v-else-if="usersError" class="service-state-message service-state-message--error">
+        <span>{{ usersError }}</span>
+        <v-btn color="primary" size="small" variant="text" @click="loadUsers">
+          Try again
+        </v-btn>
+      </div>
+      <p v-else-if="clients.length === 0" class="service-state-message">
+        No users have logged in yet.
+      </p>
+      <div v-else class="client-list">
         <v-sheet
           v-for="client in clients"
           :key="client.id"
@@ -926,20 +1322,28 @@ function sendNotificationTest() {
           @keydown.space.prevent="toggleUserDetails(client.id)"
         >
           <div class="client-list-summary">
-            <div>
-              <div class="client-name-row">
-                <h3 class="client-name">{{ client.name }}</h3>
-                <span v-if="client.disabled" class="client-disabled-status">
-                  Disabled
-                </span>
+            <div class="client-summary-identity">
+              <img
+                :src="client.avatarFailed ? defaultUserIcon : client.avatarUrl"
+                alt=""
+                class="client-avatar"
+                @error="client.avatarFailed = true"
+              />
+              <div>
+                <div class="client-name-row">
+                  <h3 class="client-name">{{ client.name }}</h3>
+                  <span v-if="client.disabled" class="client-disabled-status">
+                    Disabled
+                  </span>
+                </div>
+                <p class="client-last-used">
+                  {{ formatRegisteredDevices(client.registeredDeviceCount) }}
+                </p>
+                <p class="client-last-used">
+                  Last seen
+                  <time :datetime="client.lastUsedAt">{{ client.lastUsed }}</time>
+                </p>
               </div>
-              <p class="client-last-used">
-                {{ formatRegisteredDevices(client.registeredDeviceCount) }}
-              </p>
-              <p class="client-last-used">
-                Last seen
-                <time :datetime="client.lastUsedAt">{{ client.lastUsed }}</time>
-              </p>
             </div>
             <v-icon
               :icon="expandedUserId === client.id ? mdiChevronUp : mdiChevronDown"
@@ -953,9 +1357,9 @@ function sendNotificationTest() {
               class="client-expanded-details"
             >
               <section class="client-detail-section">
-                <h4 class="client-detail-title">Registered Clients</h4>
+                <h4 class="client-detail-title">Registered Devices</h4>
                 <p class="client-detail-description">
-                  Client applications that {{ client.name }} has logged in on
+                  Devices that {{ client.name }} has logged in on
                 </p>
                 <ul
                   v-if="client.registeredClients.length > 0"
@@ -968,13 +1372,13 @@ function sendNotificationTest() {
                     {{ registeredClient }}
                   </li>
                 </ul>
-                <p v-else class="client-empty-detail">No registered clients</p>
+                <p v-else class="client-empty-detail">No registered devices</p>
               </section>
 
               <section class="client-detail-section">
                 <h4 class="client-detail-title">Access</h4>
                 <p class="client-detail-description">
-                  OIDC groups: {{ client.oidcGroups.join(", ") }}
+                  OIDC groups: {{ client.oidcGroups.join(", ") || "None" }}
                 </p>
                 <dl class="client-access-list">
                   <div
@@ -1046,15 +1450,15 @@ function sendNotificationTest() {
         </v-card-title>
         <v-card-text>
           <template v-if="userActionToConfirm.action === 'logout'">
-            The user will be required to log in again on all clients. This can
+            The user will be required to log in again on all devices. This can
             be used to ensure user access is updated.
           </template>
           <template v-else-if="userActionToConfirm.action === 'disable'">
-            The user will be logged out on all clients and not allowed to log
+            The user will be logged out on all devices and not allowed to log
             in anymore unless re-enabled.
           </template>
           <template v-else>
-            The user will be able to log in on their client apps again.
+            The user will be able to log in on their devices again.
           </template>
         </v-card-text>
         <v-card-actions>
@@ -1076,9 +1480,15 @@ function sendNotificationTest() {
       class="home-section notification-services-section"
     >
       <div class="home-section-header">
-        <h2 id="notification-services-title" class="home-section-title">
-          Notification Services
-        </h2>
+        <div class="home-section-heading">
+          <h2 id="notification-services-title" class="home-section-title">
+            Notification Services
+          </h2>
+          <p class="home-section-subtitle">
+            Configure the notification services that will be available to your
+            Kaeru services and users.
+          </p>
+        </div>
       </div>
 
       <div class="notification-service-grid">
@@ -1116,6 +1526,123 @@ function sendNotificationTest() {
       </div>
     </section>
 
+    <section
+      ref="oidcConfigurationCard"
+      aria-labelledby="oidc-configuration-title"
+      class="home-section oidc-configuration-section"
+    >
+      <div class="home-section-header">
+        <div class="home-section-heading">
+          <h2 id="oidc-configuration-title" class="home-section-title">
+            OIDC Configuration
+          </h2>
+          <p class="home-section-subtitle">Manage your OIDC settings</p>
+        </div>
+      </div>
+
+      <v-sheet class="oidc-configuration-card" border rounded="lg">
+        <button
+          class="oidc-configuration-summary"
+          type="button"
+          :aria-expanded="oidcSettingsExpanded"
+          @click="oidcSettingsExpanded = !oidcSettingsExpanded"
+        >
+          <span class="oidc-configuration-summary-content">
+            <img
+              :src="oidcSummaryIcon"
+              alt=""
+              class="oidc-configuration-icon"
+              @error="oidcImageFailed = true"
+            />
+            <span>
+              <strong>{{ oidcSettings?.name || "OIDC" }}</strong>
+              <small>{{ oidcSettings?.issuer_url || (oidcSettingsLoading ? "Loading…" : "Not configured") }}</small>
+            </span>
+          </span>
+          <v-icon :icon="oidcSettingsExpanded ? mdiChevronUp : mdiChevronDown" />
+        </button>
+
+        <v-expand-transition>
+          <form
+            v-show="oidcSettingsExpanded"
+            class="oidc-configuration-form"
+            @submit.prevent="saveOIDCSettings"
+          >
+            <div
+              v-if="oidcVerificationStatus"
+              :class="['oidc-verification-status', `oidc-verification-status--${oidcVerificationStatus.type}`]"
+              role="status"
+            >
+              <v-icon :icon="oidcVerificationStatus.type === 'success' ? mdiCheck : mdiAlertCircleOutline" />
+              <div>
+                <strong>{{ oidcVerificationStatus.message }}</strong>
+                <p v-if="oidcVerificationStatus.detail">{{ oidcVerificationStatus.detail }}</p>
+              </div>
+              <v-btn aria-label="Dismiss message" :icon="mdiClose" size="small" type="button" variant="text" @click="oidcVerificationStatus = null" />
+            </div>
+            <p v-if="oidcSettingsError" ref="oidcSettingsErrorElement" class="oidc-setup-error" role="alert">
+              {{ oidcSettingsError }}
+            </p>
+            <OIDCConfigurationForm
+              v-model:button-image="oidcButtonImage"
+              v-model:configuration="oidcSettingsDraft"
+              :existing-button-image="oidcSettings?.button_image_configured"
+              access-urls-mode
+            />
+
+            <div class="oidc-configuration-actions">
+              <v-btn :disabled="oidcSettingsClosing" type="button" variant="text" @click="closeOIDCSettings">Close</v-btn>
+              <v-btn
+                :aria-label="oidcSettingsSaved ? 'OIDC settings saved' : 'Save OIDC settings'"
+                color="primary"
+                :loading="oidcSettingsSaving"
+                type="submit"
+                variant="flat"
+                width="80"
+              >
+                <v-icon v-if="oidcSettingsSaved" :icon="mdiCheck" />
+                <span v-else>Save</span>
+              </v-btn>
+            </div>
+          </form>
+        </v-expand-transition>
+      </v-sheet>
+    </section>
+
+    <v-dialog v-model="oidcVerificationDialog" max-width="560" persistent>
+      <v-card class="oidc-verification-dialog" rounded="lg">
+        <v-card-title>
+          {{ oidcVerificationSource === "core-admin" ? "Verify Core admin access changes?" : "Verify OIDC changes?" }}
+        </v-card-title>
+        <v-card-text class="oidc-verification-dialog-content">
+          <p v-if="oidcVerificationSource === 'core-admin'">
+            These changes affect who can administer Kaeru Core and must be verified before they are saved.
+          </p>
+          <p v-else>These changes affect how users sign in and must be verified before they are saved.</p>
+          <div class="oidc-verification-session-warning">
+            <v-icon color="warning" :icon="mdiAlertOutline" size="20" />
+            <p v-if="oidcVerificationRevokesSessions">
+              After successful verification, all users will be logged out on every device. Your newly verified session will remain signed in.
+            </p>
+            <p v-else>
+              Administrator access will update immediately. Existing user sessions will remain signed in.
+            </p>
+          </div>
+          <div>
+            <strong class="oidc-verification-changes-title">Changes requiring verification</strong>
+            <ul>
+              <li v-for="change in oidcVerificationChanges" :key="change">{{ change }}</li>
+            </ul>
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn :disabled="oidcVerificationStarting" variant="text" @click="cancelOIDCVerification">Cancel</v-btn>
+          <v-btn color="primary" :loading="oidcVerificationStarting" variant="flat" @click="startOIDCVerification">Verify Changes</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <v-dialog
       :model-value="notificationServiceToEdit !== null"
       max-width="560"
@@ -1137,29 +1664,7 @@ function sendNotificationTest() {
             label="Enabled"
           />
 
-          <div
-            v-if="notificationServiceToEdit.id === 'kaeru-relay'"
-            class="service-field"
-          >
-            <label for="notification-relay-url" class="service-field-label">
-              URL
-            </label>
-            <p id="notification-relay-url-help" class="notification-field-help">
-              URL for the Kaeru Relay notification service
-            </p>
-            <v-text-field
-              id="notification-relay-url"
-              v-model="notificationProviderDraft.url"
-              aria-describedby="notification-relay-url-help"
-              :disabled="!notificationProviderDraft.enabled"
-              hide-details="auto"
-              placeholder="https://relay.example.com"
-              type="url"
-              variant="outlined"
-            />
-          </div>
-
-          <template v-else>
+          <template v-if="notificationServiceToEdit.id === 'email'">
             <div class="service-field">
               <label for="notification-email-host" class="service-field-label">
                 Host
@@ -1324,10 +1829,10 @@ function sendNotificationTest() {
             </div>
             <div v-else class="service-field">
               <label for="test-client-app" class="service-field-label">
-                Client app
+                Device
               </label>
               <p id="test-client-app-help" class="notification-field-help">
-                Choose a client app to send the test notification to
+                Choose a device to send the test notification to
               </p>
               <v-select
                 id="test-client-app"
@@ -1335,8 +1840,8 @@ function sendNotificationTest() {
                 aria-describedby="test-client-app-help"
                 :items="registeredClientApps"
                 hide-details="auto"
-                no-data-text="No registered client apps"
-                placeholder="Select a client app"
+                no-data-text="No registered devices"
+                placeholder="Select a device"
                 variant="outlined"
               />
             </div>
@@ -1365,49 +1870,57 @@ function sendNotificationTest() {
       aria-labelledby="backup-title"
       class="home-section backup-section"
     >
-      <div class="home-section-header">
-        <h2 id="backup-title" class="home-section-title">
-          Backup and Restore
-        </h2>
-        <v-menu location="bottom end">
-          <template #activator="{ props: activatorProps }">
-            <v-btn
-              v-bind="activatorProps"
-              aria-label="Backup and restore options"
-              color="primary"
-              variant="text"
-            >
-              Options
-              <v-icon :icon="mdiChevronDown" end />
-            </v-btn>
-          </template>
+      <div class="home-section-header home-section-header--stacked">
+        <div class="home-section-heading">
+          <div class="home-section-title-row">
+            <h2 id="backup-title" class="home-section-title">
+              Backup and Restore
+            </h2>
+            <v-menu location="bottom end">
+              <template #activator="{ props: activatorProps }">
+                <v-btn
+                  v-bind="activatorProps"
+                  aria-label="Backup and restore options"
+                  color="primary"
+                  variant="text"
+                >
+                  Options
+                  <v-icon :icon="mdiChevronDown" end />
+                </v-btn>
+              </template>
 
-          <v-list class="backup-options-menu" density="compact">
-            <v-list-item
-              :prepend-icon="mdiDatabaseArrowUpOutline"
-              link
-              title="Backup now"
-            />
-            <v-list-item
-              :prepend-icon="mdiDownload"
-              link
-              title="Download"
-              @click="openDownloadBackup"
-            />
-            <v-list-item
-              :prepend-icon="mdiBackupRestore"
-              link
-              title="Restore"
-              @click="openRestoreBackup"
-            />
-            <v-list-item
-              :prepend-icon="mdiCogOutline"
-              link
-              title="Configure"
-              @click="openBackupConfiguration"
-            />
-          </v-list>
-        </v-menu>
+              <v-list class="backup-options-menu" density="compact">
+                <v-list-item
+                  :prepend-icon="mdiDatabaseArrowUpOutline"
+                  link
+                  title="Backup now"
+                />
+                <v-list-item
+                  :prepend-icon="mdiDownload"
+                  link
+                  title="Download"
+                  @click="openDownloadBackup"
+                />
+                <v-list-item
+                  :prepend-icon="mdiBackupRestore"
+                  link
+                  title="Restore"
+                  @click="openRestoreBackup"
+                />
+                <v-list-item
+                  :prepend-icon="mdiCogOutline"
+                  link
+                  title="Configure"
+                  @click="openBackupConfiguration"
+                />
+              </v-list>
+            </v-menu>
+          </div>
+          <p class="home-section-subtitle">
+            Download backups, restore from backups, or configure automatic
+            backups for all of your Kaeru services.
+          </p>
+        </div>
       </div>
 
       <v-sheet class="backup-summary" border rounded="lg">
@@ -1432,7 +1945,7 @@ function sendNotificationTest() {
           </div>
           <div class="backup-detail">
             <dt>Last backup file</dt>
-            <dd>{{ backupSummary.file }}</dd>
+            <dd>{{ backupSummary.file }} ({{ backupSummary.fileSize }})</dd>
           </div>
           <div class="backup-detail">
             <dt>Next backup</dt>

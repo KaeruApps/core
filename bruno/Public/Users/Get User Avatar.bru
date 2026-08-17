@@ -1,0 +1,26 @@
+meta {
+  name: Get User Avatar
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/v1/users/{{userId}}/avatar
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: image/png, image/jpeg, application/json
+}
+
+tests {
+  test("returns the uploaded avatar or reports that none is stored", function () {
+    expect([200, 404]).to.include(res.getStatus());
+    if (res.getStatus() === 200) {
+      expect(["image/png", "image/jpeg"]).to.include(res.getHeader("content-type"));
+    } else {
+      expect(res.getBody().error.code).to.equal("avatar_not_found");
+    }
+  });
+}

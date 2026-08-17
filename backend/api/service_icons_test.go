@@ -29,7 +29,7 @@ func TestGetServiceIcon(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/services/service-id/icon", nil)
 	response := httptest.NewRecorder()
 
-	NewRouter(Dependencies{ServiceIconManager: manager}).ServeHTTP(response, request)
+	NewRouter(authenticatedTestDependencies(Dependencies{ServiceIconManager: manager, Initialized: true})).ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK || manager.serviceID != "service-id" {
 		t.Fatalf("GET icon status = %d, service ID = %q", response.Code, manager.serviceID)
@@ -47,7 +47,7 @@ func TestGetMissingServiceIcon(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/services/service-id/icon", nil)
 	response := httptest.NewRecorder()
 
-	NewRouter(Dependencies{ServiceIconManager: manager}).ServeHTTP(response, request)
+	NewRouter(authenticatedTestDependencies(Dependencies{ServiceIconManager: manager, Initialized: true})).ServeHTTP(response, request)
 
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("GET icon status = %d, want %d", response.Code, http.StatusNotFound)

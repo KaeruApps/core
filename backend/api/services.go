@@ -70,6 +70,8 @@ func updateService(manager ServiceConfigurationManager) http.HandlerFunc {
 			writeError(response, http.StatusBadRequest, "validation_failed", validationError.Message, validationError.Field)
 		case errors.Is(err, registry.ErrServiceNotFound):
 			writeError(response, http.StatusNotFound, "service_not_found", "The requested service was not found.", "service_id")
+		case errors.Is(err, registry.ErrCoreAdminVerificationRequired):
+			writeError(response, http.StatusConflict, "oidc_verification_required", "Kaeru Core administrator groups must be verified before they can be changed.", "role_mappings")
 		default:
 			writeError(response, http.StatusInternalServerError, "internal_error", "The service could not be updated.", "")
 		}

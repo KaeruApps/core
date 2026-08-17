@@ -221,6 +221,63 @@ func TestServiceManagerKeepsCoreDefaultAtNoAccess(t *testing.T) {
 	}
 }
 
+func TestServiceManagerNormalizesCorePublicURL(t *testing.T) {
+	store := &stubServiceConfigurationStore{service: ServiceDetails{
+		Service: Service{ID: CoreServiceID, ServiceType: CoreServiceType},
+		Roles:   []ServiceRole{{Key: CoreAdminRoleKey, Active: true}},
+	}}
+	manager := NewServiceManager(store, nil, nil)
+
+	if _, err := manager.Update(context.Background(), CoreServiceID, UpdateServiceInput{
+		PublicURL: "https://core.example.com/",
+	}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if store.updated.PublicURL != "https://core.example.com" {
+		t.Fatalf("stored public URL = %q", store.updated.PublicURL)
+	}
+}
+
+func TestServiceManagerRequiresVerificationForCoreAdministratorMappingChanges(t *testing.T) {
+	store := &stubServiceConfigurationStore{service: ServiceDetails{
+		Service: Service{ID: CoreServiceID, ServiceType: CoreServiceType},
+		Roles:   []ServiceRole{{Key: CoreAdminRoleKey, Active: true}},
+		RoleMappings: []ServiceRoleMapping{
+			{RoleKey: CoreAdminRoleKey, OIDCGroups: []string{"kaeru-admins"}},
+		},
+	}}
+	manager := NewServiceManager(store, nil, nil)
+
+	_, err := manager.Update(context.Background(), CoreServiceID, UpdateServiceInput{
+		PublicURL: "https://core.example.com",
+		RoleMappings: []ServiceRoleMapping{
+			{RoleKey: CoreAdminRoleKey, OIDCGroups: []string{"new-admins"}},
+		},
+	})
+	if !errors.Is(err, ErrCoreAdminVerificationRequired) {
+		t.Fatalf("Update() error = %v, want ErrCoreAdminVerificationRequired", err)
+	}
+	if store.updated.PublicURL != "" {
+		t.Fatalf("UpdateService() was called with %#v", store.updated)
+	}
+}
+
+func TestServiceManagerRejectsCorePublicURLPath(t *testing.T) {
+	store := &stubServiceConfigurationStore{service: ServiceDetails{
+		Service: Service{ID: CoreServiceID, ServiceType: CoreServiceType},
+		Roles:   []ServiceRole{{Key: CoreAdminRoleKey, Active: true}},
+	}}
+	manager := NewServiceManager(store, nil, nil)
+
+	_, err := manager.Update(context.Background(), CoreServiceID, UpdateServiceInput{
+		PublicURL: "https://core.example.com/kaeru",
+	})
+	var validationError *ValidationError
+	if !errors.As(err, &validationError) || validationError.Field != "public_url" {
+		t.Fatalf("Update() error = %v, want public_url validation error", err)
+	}
+}
+
 func TestValidateServiceUpdateRejectsInvalidConfiguration(t *testing.T) {
 	roles := []ServiceRole{{Key: "viewer", Active: true}, {Key: "retired", Active: false}}
 	tests := []struct {

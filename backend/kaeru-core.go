@@ -15,6 +15,7 @@ import (
 	"github.com/KaeruApps/core/internal/config"
 	"github.com/KaeruApps/core/internal/database"
 	"github.com/KaeruApps/core/internal/identity"
+	"github.com/KaeruApps/core/internal/installation"
 	"github.com/KaeruApps/core/internal/registry"
 	"github.com/KaeruApps/core/internal/serviceclient"
 )
@@ -69,6 +70,18 @@ func main() {
 	defer databasePool.Close()
 
 	serviceStore := database.NewRegistryStore(databasePool)
+	installationStore := database.NewInstallationStore(databasePool)
+	oidcSetupStore := database.NewOIDCSetupStore(databasePool)
+	oidcSetupManager := installation.NewOIDCSetupManager(oidcSetupStore, 10*time.Second)
+	oidcLoginManager := installation.NewOIDCLoginManager(oidcSetupStore, 10*time.Second)
+	oidcSettingsManager := installation.NewOIDCSettingsManager(oidcSetupStore, 10*time.Second)
+	oidcCallbackManager := identity.NewOIDCCallbackManager(oidcSetupStore, 10*time.Second)
+	identityStore := database.NewIdentityStore(databasePool)
+	sessionManager := identity.NewSessionManager(identityStore)
+	userPreferencesStore := database.NewUserPreferencesStore(databasePool)
+	userPreferencesManager := identity.NewUserPreferencesManager(userPreferencesStore)
+	userAvatarManager := identity.NewUserAvatarManager(userPreferencesStore)
+	userDirectory := identity.NewUserDirectory(database.NewUserDirectoryStore(databasePool))
 	now := time.Now().UTC()
 	if err := serviceStore.EnsureCoreService(
 		databaseContext,
@@ -108,6 +121,16 @@ func main() {
 			ServiceRegistrar:            serviceRegistrar,
 			ServiceConfigurationManager: serviceManager,
 			ServiceIconManager:          serviceIconManager,
+			InstallationState:           installationStore,
+			OIDCSetupManager:            oidcSetupManager,
+			OIDCLoginManager:            oidcLoginManager,
+			OIDCSettingsManager:         oidcSettingsManager,
+			OIDCCallbackManager:         oidcCallbackManager,
+			SessionAuthenticator:        sessionManager,
+			SessionLogoutManager:        sessionManager,
+			UserPreferencesManager:      userPreferencesManager,
+			UserAvatarManager:           userAvatarManager,
+			UserDirectory:               userDirectory,
 			Initialized:                 runtimeConfig.DevelopmentAuth,
 			DevelopmentMode:             runtimeConfig.DevelopmentAuth,
 			DevelopmentPrincipal:        developmentPrincipal,

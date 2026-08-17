@@ -37,7 +37,7 @@ func TestRegisterService(t *testing.T) {
 	}`))
 	response := httptest.NewRecorder()
 
-	NewRouter(Dependencies{ServiceRegistrar: registrar}).ServeHTTP(response, request)
+	NewRouter(Dependencies{ServiceRegistrar: registrar, Initialized: true}).ServeHTTP(response, request)
 
 	if response.Code != http.StatusCreated {
 		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, response.Code, response.Body.String())
@@ -74,7 +74,7 @@ func TestRegisterServiceErrors(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, "/api/v1/internal/services/register", strings.NewReader(`{}`))
 			response := httptest.NewRecorder()
 
-			NewRouter(Dependencies{ServiceRegistrar: registrar}).ServeHTTP(response, request)
+			NewRouter(Dependencies{ServiceRegistrar: registrar, Initialized: true}).ServeHTTP(response, request)
 
 			if response.Code != test.wantStatus {
 				t.Fatalf("expected status %d, got %d", test.wantStatus, response.Code)
@@ -94,9 +94,34 @@ func TestRegisterServiceRejectsRoles(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/internal/services/register", strings.NewReader(`{"roles":[]}`))
 	response := httptest.NewRecorder()
 
-	NewRouter(Dependencies{ServiceRegistrar: &stubServiceRegistrar{}}).ServeHTTP(response, request)
+	NewRouter(Dependencies{ServiceRegistrar: &stubServiceRegistrar{}, Initialized: true}).ServeHTTP(response, request)
 
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, response.Code)
+	}
+}
+
+func TestRegisterServiceWaitsForInitialization(t *testing.T) {
+	registrar := &stubServiceRegistrar{}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/internal/services/register", strings.NewReader(`{}`))
+	response := httptest.NewRecorder()
+
+	NewRouter(Dependencies{ServiceRegistrar: registrar}).ServeHTTP(response, request)
+
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, response.Code)
+	}
+	if retryAfter := response.Header().Get("Retry-After"); retryAfter != "15" {
+		t.Fatalf("expected Retry-After 15, got %q", retryAfter)
+	}
+	var responseError apiError
+	if err := json.NewDecoder(response.Body).Decode(&responseError); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if responseError.Error.Code != "core_not_initialized" {
+		t.Fatalf("expected core_not_initialized, got %q", responseError.Error.Code)
+	}
+	if registrar.input.ServiceType != "" {
+		t.Fatal("registrar should not be called before Core is initialized")
 	}
 }

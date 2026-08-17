@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/KaeruApps/core/internal/installation"
 	"github.com/KaeruApps/core/internal/registry"
 )
 
@@ -21,8 +22,23 @@ type apiErrorDetails struct {
 	Field   string `json:"field,omitempty"`
 }
 
-func registerService(registrar ServiceRegistrar) http.HandlerFunc {
+func registerService(
+	registrar ServiceRegistrar,
+	installationState installation.StateReader,
+	initializedOverride bool,
+) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
+		state, err := effectiveInstallationState(request.Context(), installationState, initializedOverride)
+		if err != nil {
+			writeError(response, http.StatusServiceUnavailable, "installation_state_unavailable", "The installation state could not be loaded. Retry registration later.", "")
+			return
+		}
+		if state != installation.StateReady {
+			response.Header().Set("Retry-After", "15")
+			writeError(response, http.StatusServiceUnavailable, "core_not_initialized", "Kaeru Core setup is not complete. Retry registration after Core has been initialized.", "")
+			return
+		}
+
 		if registrar == nil {
 			writeError(response, http.StatusServiceUnavailable, "service_registry_unavailable", "Service registration is unavailable.", "")
 			return

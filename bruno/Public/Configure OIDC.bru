@@ -1,0 +1,28 @@
+meta {
+  name: Configure OIDC
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/v1/setup/oidc
+  body: multipartForm
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+body:multipart-form {
+  issuer_url: {{oidcIssuerUrl}}
+  client_id: {{oidcClientId}}
+  client_secret: {{oidcClientSecret}}
+  additional_scopes: groups
+  username_claim: preferred_username
+  avatar_claim: picture
+  groups_claim: groups
+  admin_group: kaeru-admins
+  button_text: Sign in with OIDC
+  redirect_uri: {{browserBaseUrl}}/api/v1/auth/oidc/callback
+}

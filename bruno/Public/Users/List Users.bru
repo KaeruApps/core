@@ -1,0 +1,37 @@
+meta {
+  name: List Users
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/users
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+script:post-response {
+  if (res.getStatus() === 200 && res.body.length > 0) {
+    bru.setVar("userId", res.body[0].id);
+  }
+}
+
+tests {
+  test("returns the user directory", function () {
+    const body = res.getBody();
+
+    expect(res.getStatus()).to.equal(200);
+    expect(body).to.be.an("array");
+    if (body.length > 0) {
+      expect(body[0].id).to.be.a("string").and.not.be.empty;
+      expect(body[0].username).to.be.a("string").and.not.be.empty;
+      expect(body[0].oidc_groups).to.be.an("array");
+      expect(body[0].access).to.be.an("array");
+      expect(body[0].registered_devices).to.be.an("array");
+    }
+  });
+}

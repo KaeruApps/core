@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
 	"golang.org/x/sync/singleflight"
 )
+
+var ErrCoreAdminVerificationRequired = errors.New("Kaeru Core administrator mappings require OIDC verification")
 
 const (
 	maxRoleMappings  = 100
@@ -138,11 +142,35 @@ func (manager *ServiceManager) Update(ctx context.Context, serviceID string, inp
 	if service.ServiceType == CoreServiceType && input.DefaultRoleKey != nil {
 		return ServiceDetails{}, &ValidationError{Field: "default_role_key", Message: "Kaeru Core must default to No Access"}
 	}
+	if service.ServiceType == CoreServiceType {
+		input.PublicURL = strings.TrimRight(input.PublicURL, "/")
+		parsed, parseErr := url.ParseRequestURI(input.PublicURL)
+		if parseErr != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
+			return ServiceDetails{}, &ValidationError{Field: "public_url", Message: "Kaeru Core public URL must be an HTTP or HTTPS origin without a path, query, or fragment"}
+		}
+	}
 	if err := ValidateServiceUpdate(input, service.Roles); err != nil {
 		return ServiceDetails{}, err
 	}
+	if service.ServiceType == CoreServiceType && !slices.Equal(
+		sortedRoleGroups(service.RoleMappings, CoreAdminRoleKey),
+		sortedRoleGroups(input.RoleMappings, CoreAdminRoleKey),
+	) {
+		return ServiceDetails{}, ErrCoreAdminVerificationRequired
+	}
 
 	return manager.store.UpdateService(ctx, serviceID, input)
+}
+
+func sortedRoleGroups(mappings []ServiceRoleMapping, roleKey string) []string {
+	groups := []string{}
+	for _, mapping := range mappings {
+		if mapping.RoleKey == roleKey {
+			groups = append(groups, mapping.OIDCGroups...)
+		}
+	}
+	slices.Sort(groups)
+	return slices.Compact(groups)
 }
 
 func ValidateServiceUpdate(input UpdateServiceInput, roles []ServiceRole) error {

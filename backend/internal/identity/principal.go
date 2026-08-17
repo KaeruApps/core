@@ -3,8 +3,12 @@ package identity
 import "context"
 
 type Principal struct {
+	ID           string            `json:"id,omitempty"`
 	Subject      string            `json:"subject"`
 	Name         string            `json:"name"`
+	DisplayName  *string           `json:"display_name,omitempty"`
+	Email        *string           `json:"email,omitempty"`
+	AvatarURL    *string           `json:"avatar_url,omitempty"`
 	ServiceRoles map[string]string `json:"service_roles"`
 }
 

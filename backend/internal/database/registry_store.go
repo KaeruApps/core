@@ -316,6 +316,12 @@ func (store *RegistryStore) UpdateService(ctx context.Context, serviceID string,
 	defer func() { _ = transaction.Rollback(context.WithoutCancel(ctx)) }()
 
 	queries := store.queries.WithTx(transaction)
+	var serviceType string
+	if err := transaction.QueryRow(ctx, `SELECT service_type FROM services WHERE id = $1`, serviceID).Scan(&serviceType); errors.Is(err, pgx.ErrNoRows) {
+		return registry.ServiceDetails{}, registry.ErrServiceNotFound
+	} else if err != nil {
+		return registry.ServiceDetails{}, fmt.Errorf("load service type: %w", err)
+	}
 	nativeAppsURL := nullableString(input.NativeAppsURL)
 	rowsAffected, err := queries.UpdateServiceConfiguration(ctx, dbsqlc.UpdateServiceConfigurationParams{
 		ID:             serviceID,
@@ -328,6 +334,15 @@ func (store *RegistryStore) UpdateService(ctx context.Context, serviceID string,
 	}
 	if rowsAffected != 1 {
 		return registry.ServiceDetails{}, registry.ErrServiceNotFound
+	}
+	if serviceType == registry.CoreServiceType && input.PublicURL != "" {
+		if _, err := transaction.Exec(ctx, `
+			UPDATE oidc_settings
+			SET access_urls = ARRAY[$1] || array_remove(access_urls, $1)
+			WHERE singleton = TRUE
+		`, input.PublicURL); err != nil {
+			return registry.ServiceDetails{}, fmt.Errorf("synchronize Kaeru Core access URL: %w", err)
+		}
 	}
 	if err := queries.DeleteServiceRoleGroups(ctx, serviceID); err != nil {
 		return registry.ServiceDetails{}, fmt.Errorf("replace service role mappings: %w", err)

@@ -1,0 +1,26 @@
+meta {
+  name: Setup Status
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/v1/setup/status
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+tests {
+  test("returns the effective installation state", function () {
+    const body = res.getBody();
+
+    expect(res.getStatus()).to.equal(200);
+    expect(body.state).to.be.oneOf(["required", "configuring", "restoring", "ready"]);
+    expect(body.initialized).to.be.a("boolean");
+    expect(body.development_mode).to.be.a("boolean");
+  });
+}

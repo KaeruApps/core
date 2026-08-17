@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,10 +12,126 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KaeruApps/core/internal/identity"
+	"github.com/KaeruApps/core/internal/installation"
 	"github.com/KaeruApps/core/internal/registry"
 	"github.com/KaeruApps/core/internal/serviceclient"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestPostgresOIDCBootstrap(t *testing.T) {
+	databaseURL := os.Getenv("KAERU_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("KAERU_TEST_DATABASE_URL is not set")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(pool.Close)
+	reset := func(resetContext context.Context) {
+		_, _ = pool.Exec(resetContext, `
+			DELETE FROM user_sessions;
+			DELETE FROM user_oidc_groups;
+			DELETE FROM users;
+			DELETE FROM oidc_login_attempts;
+			DELETE FROM oidc_settings;
+			UPDATE installation_settings SET setup_state = 'required' WHERE singleton = TRUE;
+		`)
+	}
+	reset(ctx)
+	t.Cleanup(func() {
+		cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		reset(cleanupContext)
+	})
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	state := "integration-state"
+	stateHash := sha256.Sum256([]byte(state))
+	setupStore := NewOIDCSetupStore(pool)
+	configuration := installation.OIDCConfiguration{
+		OIDCSetupInput: installation.OIDCSetupInput{
+			Name:       "KyleAuth",
+			PublicURL:  "https://core.example.com",
+			AccessURLs: []string{"https://core.example.com"},
+			IssuerURL:  "https://identity.example.com", ClientID: "kaeru-core", ClientSecret: "secret",
+			UsernameClaim: "preferred_username", AvatarClaim: "picture", GroupsClaim: "groups",
+			AdminGroups: []string{"kaeru-admins", "platform-admins"}, ButtonText: "Sign in", RedirectURI: "https://core.example.com/api/v1/auth/oidc/callback",
+		},
+		UpdatedAt: now,
+	}
+	attempt := installation.OIDCLoginAttempt{
+		StateHash: stateHash, CodeVerifier: "verifier", Nonce: "nonce",
+		RedirectURI: configuration.RedirectURI, CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute),
+		Purpose: installation.OIDCLoginPurposeSetup,
+	}
+	if err := setupStore.SaveOIDCSetup(ctx, configuration, attempt); err != nil {
+		t.Fatalf("SaveOIDCSetup() error = %v", err)
+	}
+	loadedConfiguration, loadedAttempt, err := setupStore.ConsumeOIDCLoginAttempt(ctx, stateHash, now)
+	if err != nil {
+		t.Fatalf("ConsumeOIDCLoginAttempt() error = %v", err)
+	}
+	if loadedAttempt.Nonce != "nonce" {
+		t.Fatalf("unexpected callback state: %#v, %#v", loadedConfiguration, loadedAttempt)
+	}
+	allowed, err := setupStore.CoreAdministratorAllowed(ctx, []string{"users", "kaeru-admins"})
+	if err != nil || !allowed {
+		t.Fatalf("CoreAdministratorAllowed() allowed = %v, error = %v", allowed, err)
+	}
+
+	tokenHash := sha256.Sum256([]byte("session-token"))
+	user := identity.OIDCIdentity{
+		ID: "019c2a46-7f5d-7ca2-9f4a-ae191ca84322", Issuer: configuration.IssuerURL,
+		Subject: "admin-subject", Username: "Admin", DisplayName: "Admin", Groups: []string{"kaeru-admins", "users"},
+	}
+	session := identity.BrowserSession{
+		ID: "019c2a46-7f5d-7ca2-9f4a-ae191ca84323", TokenHash: tokenHash,
+		CreatedAt: now, ExpiresAt: now.Add(time.Hour), UserAgent: "integration test", IPAddress: "127.0.0.1",
+	}
+	if err := setupStore.BootstrapAdministrator(ctx, user, session, now); err != nil {
+		t.Fatalf("BootstrapAdministrator() error = %v", err)
+	}
+	principal, authenticated, err := NewIdentityStore(pool).PrincipalBySessionHash(ctx, tokenHash, now.Add(time.Minute))
+	if err != nil || !authenticated {
+		t.Fatalf("PrincipalBySessionHash() authenticated = %v, error = %v", authenticated, err)
+	}
+	if principal.Name != "Admin" || principal.ServiceRoles["core"] != "admin" {
+		t.Fatalf("unexpected principal: %#v", principal)
+	}
+	users, err := NewUserDirectoryStore(pool).ListUsers(ctx)
+	if err != nil {
+		t.Fatalf("ListUsers() error = %v", err)
+	}
+	if len(users) != 1 || users[0].Username != "Admin" || len(users[0].OIDCGroups) != 2 {
+		t.Fatalf("unexpected user directory: %#v", users)
+	}
+}
+
+func TestPostgresUserDirectoryReadOnly(t *testing.T) {
+	databaseURL := os.Getenv("KAERU_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("KAERU_TEST_DATABASE_URL is not set")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to database: %v", err)
+	}
+	defer pool.Close()
+
+	users, err := NewUserDirectoryStore(pool).ListUsers(ctx)
+	if err != nil {
+		t.Fatalf("ListUsers() error = %v", err)
+	}
+	t.Logf("loaded %d users", len(users))
+}
 
 func TestPostgresRegistration(t *testing.T) {
 	databaseURL := os.Getenv("KAERU_TEST_DATABASE_URL")

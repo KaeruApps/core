@@ -47,7 +47,7 @@ func TestGetService(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/services/service-id", nil)
 	response := httptest.NewRecorder()
 
-	NewRouter(Dependencies{ServiceConfigurationManager: manager}).ServeHTTP(response, request)
+	NewRouter(authenticatedTestDependencies(Dependencies{ServiceConfigurationManager: manager, Initialized: true})).ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK || manager.serviceID != "service-id" {
 		t.Fatalf("GET service status = %d, service ID = %q", response.Code, manager.serviceID)
@@ -68,7 +68,7 @@ func TestListServices(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/services", nil)
 	response := httptest.NewRecorder()
 
-	NewRouter(Dependencies{ServiceConfigurationManager: manager}).ServeHTTP(response, request)
+	NewRouter(authenticatedTestDependencies(Dependencies{ServiceConfigurationManager: manager, Initialized: true})).ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("GET services status = %d: %s", response.Code, response.Body.String())
@@ -92,7 +92,7 @@ func TestUpdateService(t *testing.T) {
 	}`))
 	response := httptest.NewRecorder()
 
-	NewRouter(Dependencies{ServiceConfigurationManager: manager}).ServeHTTP(response, request)
+	NewRouter(authenticatedTestDependencies(Dependencies{ServiceConfigurationManager: manager, Initialized: true})).ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("PUT service status = %d: %s", response.Code, response.Body.String())
@@ -105,6 +105,23 @@ func TestUpdateService(t *testing.T) {
 	}
 }
 
+func TestUpdateCoreAdministratorMappingsRequiresOIDCVerification(t *testing.T) {
+	manager := &stubServiceConfigurationManager{err: registry.ErrCoreAdminVerificationRequired}
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/services/"+registry.CoreServiceID, strings.NewReader(`{
+		"public_url":"https://core.example.com",
+		"native_apps_url":null,
+		"default_role_key":null,
+		"role_mappings":[{"role_key":"admin","oidc_groups":["new-admins"]}]
+	}`))
+	response := httptest.NewRecorder()
+
+	NewRouter(authenticatedTestDependencies(Dependencies{ServiceConfigurationManager: manager, Initialized: true})).ServeHTTP(response, request)
+
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "oidc_verification_required") {
+		t.Fatalf("PUT Core service status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
 func TestUnregisterService(t *testing.T) {
 	manager := &stubServiceConfigurationManager{service: registry.ServiceDetails{Service: registry.Service{
 		ID: "service-id", RegistrationStatus: "unregistered",
@@ -112,7 +129,7 @@ func TestUnregisterService(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/services/service-id/unregister", nil)
 	response := httptest.NewRecorder()
 
-	NewRouter(Dependencies{ServiceConfigurationManager: manager}).ServeHTTP(response, request)
+	NewRouter(authenticatedTestDependencies(Dependencies{ServiceConfigurationManager: manager, Initialized: true})).ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK || manager.serviceID != "service-id" {
 		t.Fatalf("POST unregister status = %d, service ID = %q", response.Code, manager.serviceID)
@@ -131,7 +148,7 @@ func TestUnregisterBuiltInServiceIsRejected(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/services/"+registry.CoreServiceID+"/unregister", nil)
 	response := httptest.NewRecorder()
 
-	NewRouter(Dependencies{ServiceConfigurationManager: manager}).ServeHTTP(response, request)
+	NewRouter(authenticatedTestDependencies(Dependencies{ServiceConfigurationManager: manager, Initialized: true})).ServeHTTP(response, request)
 
 	if response.Code != http.StatusConflict {
 		t.Fatalf("POST unregister status = %d, body = %s", response.Code, response.Body.String())
@@ -156,7 +173,7 @@ func TestServiceEndpointErrors(t *testing.T) {
 			manager := &stubServiceConfigurationManager{err: test.err}
 			request := httptest.NewRequest(test.method, "/api/v1/services/service-id", strings.NewReader(`{}`))
 			response := httptest.NewRecorder()
-			NewRouter(Dependencies{ServiceConfigurationManager: manager}).ServeHTTP(response, request)
+			NewRouter(authenticatedTestDependencies(Dependencies{ServiceConfigurationManager: manager, Initialized: true})).ServeHTTP(response, request)
 
 			if response.Code != test.wantStatus {
 				t.Fatalf("status = %d, want %d", response.Code, test.wantStatus)

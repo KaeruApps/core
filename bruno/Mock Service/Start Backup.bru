@@ -1,0 +1,29 @@
+meta {
+  name: Start Backup
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{mockServiceUrl}}/api/core/v1/backup?option=1
+  body: none
+  auth: none
+}
+
+params:query {
+  option: 1
+}
+
+headers {
+  Accept: application/json
+}
+
+tests {
+  test("accepts a backup request for a published option", function () {
+    const body = res.getBody();
+
+    expect(res.getStatus()).to.equal(202);
+    expect(body.status).to.equal("started");
+    expect(body.option).to.be.a("string").that.is.not.empty;
+  });
+}

@@ -86,7 +86,6 @@ func TestUpdateService(t *testing.T) {
 	manager := &stubServiceConfigurationManager{service: registry.ServiceDetails{Service: registry.Service{ID: "service-id"}}}
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/services/service-id", strings.NewReader(`{
 		"public_url":"https://upload.example.com",
-		"native_apps_url":null,
 		"default_role_key":"viewer",
 		"role_mappings":[{"role_key":"admin","oidc_groups":["administrators"]}]
 	}`))
@@ -109,7 +108,6 @@ func TestUpdateCoreAdministratorMappingsRequiresOIDCVerification(t *testing.T) {
 	manager := &stubServiceConfigurationManager{err: registry.ErrCoreAdminVerificationRequired}
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/services/"+registry.CoreServiceID, strings.NewReader(`{
 		"public_url":"https://core.example.com",
-		"native_apps_url":null,
 		"default_role_key":null,
 		"role_mappings":[{"role_key":"admin","oidc_groups":["new-admins"]}]
 	}`))

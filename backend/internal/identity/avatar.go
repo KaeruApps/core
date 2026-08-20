@@ -77,6 +77,12 @@ func processUserAvatar(content []byte) ([]byte, string, error) {
 	if err != nil || decodedFormat != format {
 		return nil, "", ErrUserAvatarInvalid
 	}
+	// Phone cameras record the frame in sensor orientation and note the
+	// required rotation in EXIF. Correct it before cropping so the crop is
+	// taken from the upright image rather than the stored one.
+	if format == "jpeg" {
+		source = applyOrientation(source, exifOrientation(content))
+	}
 	bounds := source.Bounds()
 	side := min(bounds.Dx(), bounds.Dy())
 	crop := image.Rect(

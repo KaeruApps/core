@@ -291,11 +291,22 @@ func TestValidateServiceUpdateRejectsInvalidConfiguration(t *testing.T) {
 		{name: "mapping without groups", input: updateInputWithMapping("viewer"), field: "role_mappings[0].oidc_groups"},
 		{name: "empty group", input: updateInputWithMapping("viewer", ""), field: "role_mappings[0].oidc_groups[0]"},
 		{name: "duplicate group", input: updateInputWithMapping("viewer", "employees", "employees"), field: "role_mappings[0].oidc_groups[1]"},
+		{
+			name: "duplicate role mapping",
+			input: UpdateServiceInput{
+				PublicURL: "https://service.example.com",
+				RoleMappings: []ServiceRoleMapping{
+					{RoleKey: "viewer", OIDCGroups: []string{"employees"}},
+					{RoleKey: "viewer", OIDCGroups: []string{"contractors"}},
+				},
+			},
+			field: "role_mappings[1].role_key",
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			err := ValidateServiceUpdate(test.input, roles)
+			err := ValidateServiceUpdate(test.input, roles, false, nil)
 			var validationError *ValidationError
 			if !errors.As(err, &validationError) || validationError.Field != test.field {
 				t.Fatalf("ValidateServiceUpdate() error = %v, want field %q", err, test.field)

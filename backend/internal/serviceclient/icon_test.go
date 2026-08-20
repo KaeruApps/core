@@ -13,7 +13,7 @@ func TestIconClientFetchesSVG(t *testing.T) {
 	client := &IconClient{httpClient: &http.Client{
 		Timeout: time.Second,
 		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-			if request.URL.Path != "/api/v1/system/icon" {
+			if request.URL.Path != "/api/core/v1/system/icon" {
 				t.Fatalf("path = %q", request.URL.Path)
 			}
 			headers := make(http.Header)

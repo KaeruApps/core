@@ -13,13 +13,15 @@
     "db:up": "docker compose up -d --wait postgres",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f postgres",
+    "db:test:create": "docker compose exec -T postgres psql -U kaeru -d postgres -c 'CREATE DATABASE kaeru_test' 2>/dev/null || true",
     "dev": "cd backend && KAERU_DEV_AUTH=true go run .",
     "dev:backend": "cd backend && KAERU_DEV_AUTH=true go run .",
     "dev:mock-service": "cd backend && go run ./dev/mock-service",
     "dev:frontend": "npm run dev --workspace frontend",
     "build:frontend": "npm run build --workspace frontend",
     "start": "cd backend && go run .",
-    "test": "cd backend && go test ./..."
+    "test": "cd backend && go test ./...",
+    "test:integration": "npm run db:test:create && cd backend && KAERU_TEST_DATABASE_URL=\"postgresql://kaeru:kaeru_dev@localhost:5432/kaeru_test?sslmode=disable\" go test ./internal/database/ -count=1"
   },
   "engines": {
     "node": ">=24"

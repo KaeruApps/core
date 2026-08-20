@@ -96,7 +96,7 @@ func TestRegisterCreatesServiceAndCredentials(t *testing.T) {
 	if !found || service.ID != result.ServiceID {
 		t.Fatalf("registered service was not stored: %#v", service)
 	}
-	if service.PublicURL != "" || service.NativeAppsURL != "" {
+	if service.PublicURL != "" {
 		t.Fatalf("registration must not set Core-managed public URLs: %#v", service)
 	}
 	if service.ProvisioningStatus != "registered" || service.DatabaseName != provisioner.credentials.Database {

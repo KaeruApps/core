@@ -103,6 +103,8 @@ func main() {
 	serviceRegistrar := registry.NewRegistrar(serviceStore, serviceProvisioner, serviceIconManager).
 		WithHealthRefresher(healthMonitor)
 	roleCatalogClient := serviceclient.NewRoleCatalogClient(2 * time.Second)
+	backupOptionsClient := serviceclient.NewBackupOptionsClient(2 * time.Second)
+	backupDirectory := registry.NewBackupDirectory(serviceStore, backupOptionsClient)
 	serviceManager := registry.NewServiceManager(serviceStore, roleCatalogClient, serviceProvisioner)
 	var developmentPrincipal *identity.Principal
 	if runtimeConfig.DevelopmentAuth {
@@ -121,6 +123,7 @@ func main() {
 			ServiceRegistrar:            serviceRegistrar,
 			ServiceConfigurationManager: serviceManager,
 			ServiceIconManager:          serviceIconManager,
+			BackupOptionsDirectory:      backupDirectory,
 			InstallationState:           installationStore,
 			OIDCSetupManager:            oidcSetupManager,
 			OIDCLoginManager:            oidcLoginManager,

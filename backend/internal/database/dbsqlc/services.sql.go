@@ -39,13 +39,12 @@ INSERT INTO services (
     version,
     internal_url,
     public_url,
-    native_apps_url,
     service_token_hash,
     registration_status,
     created_at,
     last_seen_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, 'registering', $10, $11
+    $1, $2, $3, $4, $5, $6, $7, $8, 'registering', $9, $10
 )
 ON CONFLICT (service_type) DO UPDATE
 SET instance_id = EXCLUDED.instance_id,
@@ -68,7 +67,6 @@ RETURNING
     version,
     internal_url,
     public_url,
-    native_apps_url,
     default_role_key,
     database_host,
     database_port,
@@ -92,7 +90,6 @@ type ClaimServiceRegistrationParams struct {
 	Version          string             `json:"version"`
 	InternalUrl      string             `json:"internal_url"`
 	PublicUrl        string             `json:"public_url"`
-	NativeAppsUrl    *string            `json:"native_apps_url"`
 	ServiceTokenHash []byte             `json:"service_token_hash"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	LastSeenAt       pgtype.Timestamptz `json:"last_seen_at"`
@@ -106,7 +103,6 @@ type ClaimServiceRegistrationRow struct {
 	Version                   string             `json:"version"`
 	InternalUrl               string             `json:"internal_url"`
 	PublicUrl                 string             `json:"public_url"`
-	NativeAppsUrl             *string            `json:"native_apps_url"`
 	DefaultRoleKey            *string            `json:"default_role_key"`
 	DatabaseHost              *string            `json:"database_host"`
 	DatabasePort              *int32             `json:"database_port"`
@@ -131,7 +127,6 @@ func (q *Queries) ClaimServiceRegistration(ctx context.Context, arg ClaimService
 		arg.Version,
 		arg.InternalUrl,
 		arg.PublicUrl,
-		arg.NativeAppsUrl,
 		arg.ServiceTokenHash,
 		arg.CreatedAt,
 		arg.LastSeenAt,
@@ -145,7 +140,6 @@ func (q *Queries) ClaimServiceRegistration(ctx context.Context, arg ClaimService
 		&i.Version,
 		&i.InternalUrl,
 		&i.PublicUrl,
-		&i.NativeAppsUrl,
 		&i.DefaultRoleKey,
 		&i.DatabaseHost,
 		&i.DatabasePort,
@@ -216,6 +210,24 @@ func (q *Queries) CompleteServiceProvisioning(ctx context.Context, arg CompleteS
 	return result.RowsAffected(), nil
 }
 
+const createAlternateUrlGroup = `-- name: CreateAlternateUrlGroup :one
+INSERT INTO alternate_url_groups (name, created_at)
+VALUES ($1, $2)
+RETURNING id
+`
+
+type CreateAlternateUrlGroupParams struct {
+	Name      string             `json:"name"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) CreateAlternateUrlGroup(ctx context.Context, arg CreateAlternateUrlGroupParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createAlternateUrlGroup, arg.Name, arg.CreatedAt)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createServiceRoleGroup = `-- name: CreateServiceRoleGroup :exec
 INSERT INTO service_role_groups (service_id, role_key, oidc_group)
 VALUES ($1, $2, $3)
@@ -243,6 +255,25 @@ func (q *Queries) DeactivateServiceRoles(ctx context.Context, serviceID string) 
 	return err
 }
 
+const deleteAllAlternateUrlGroups = `-- name: DeleteAllAlternateUrlGroups :exec
+DELETE FROM alternate_url_groups
+`
+
+func (q *Queries) DeleteAllAlternateUrlGroups(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, deleteAllAlternateUrlGroups)
+	return err
+}
+
+const deleteAlternateUrlGroupsExcept = `-- name: DeleteAlternateUrlGroupsExcept :exec
+DELETE FROM alternate_url_groups
+WHERE NOT (id = ANY($1::BIGINT[]))
+`
+
+func (q *Queries) DeleteAlternateUrlGroupsExcept(ctx context.Context, keptIds []int64) error {
+	_, err := q.db.Exec(ctx, deleteAlternateUrlGroupsExcept, keptIds)
+	return err
+}
+
 const deleteService = `-- name: DeleteService :exec
 DELETE FROM services
 WHERE id = $1
@@ -250,6 +281,16 @@ WHERE id = $1
 
 func (q *Queries) DeleteService(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, deleteService, id)
+	return err
+}
+
+const deleteServiceAlternateUrls = `-- name: DeleteServiceAlternateUrls :exec
+DELETE FROM service_alternate_urls
+WHERE service_id = $1
+`
+
+func (q *Queries) DeleteServiceAlternateUrls(ctx context.Context, serviceID string) error {
+	_, err := q.db.Exec(ctx, deleteServiceAlternateUrls, serviceID)
 	return err
 }
 
@@ -338,7 +379,6 @@ SELECT
     version,
     internal_url,
     public_url,
-    native_apps_url,
     default_role_key,
     role_catalog_refreshed_at,
     role_catalog_refresh_error,
@@ -366,7 +406,6 @@ type GetServiceByIDRow struct {
 	Version                   string             `json:"version"`
 	InternalUrl               string             `json:"internal_url"`
 	PublicUrl                 string             `json:"public_url"`
-	NativeAppsUrl             *string            `json:"native_apps_url"`
 	DefaultRoleKey            *string            `json:"default_role_key"`
 	RoleCatalogRefreshedAt    pgtype.Timestamptz `json:"role_catalog_refreshed_at"`
 	RoleCatalogRefreshError   *string            `json:"role_catalog_refresh_error"`
@@ -395,7 +434,6 @@ func (q *Queries) GetServiceByID(ctx context.Context, id string) (GetServiceByID
 		&i.Version,
 		&i.InternalUrl,
 		&i.PublicUrl,
-		&i.NativeAppsUrl,
 		&i.DefaultRoleKey,
 		&i.RoleCatalogRefreshedAt,
 		&i.RoleCatalogRefreshError,
@@ -424,7 +462,6 @@ SELECT
     version,
     internal_url,
     public_url,
-    native_apps_url,
     default_role_key,
     database_host,
     database_port,
@@ -450,7 +487,6 @@ type GetServiceByInstanceIDRow struct {
 	Version                   string             `json:"version"`
 	InternalUrl               string             `json:"internal_url"`
 	PublicUrl                 string             `json:"public_url"`
-	NativeAppsUrl             *string            `json:"native_apps_url"`
 	DefaultRoleKey            *string            `json:"default_role_key"`
 	DatabaseHost              *string            `json:"database_host"`
 	DatabasePort              *int32             `json:"database_port"`
@@ -477,7 +513,6 @@ func (q *Queries) GetServiceByInstanceID(ctx context.Context, instanceID string)
 		&i.Version,
 		&i.InternalUrl,
 		&i.PublicUrl,
-		&i.NativeAppsUrl,
 		&i.DefaultRoleKey,
 		&i.DatabaseHost,
 		&i.DatabasePort,
@@ -526,6 +561,71 @@ func (q *Queries) GetServiceTokenHash(ctx context.Context, id string) ([]byte, e
 	var service_token_hash []byte
 	err := row.Scan(&service_token_hash)
 	return service_token_hash, err
+}
+
+const listAlternateUrlGroups = `-- name: ListAlternateUrlGroups :many
+SELECT id, name
+FROM alternate_url_groups
+ORDER BY name
+`
+
+type ListAlternateUrlGroupsRow struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+func (q *Queries) ListAlternateUrlGroups(ctx context.Context) ([]ListAlternateUrlGroupsRow, error) {
+	rows, err := q.db.Query(ctx, listAlternateUrlGroups)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAlternateUrlGroupsRow{}
+	for rows.Next() {
+		var i ListAlternateUrlGroupsRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listServiceAlternateUrls = `-- name: ListServiceAlternateUrls :many
+SELECT groups.id, groups.name, urls.url
+FROM alternate_url_groups AS groups
+LEFT JOIN service_alternate_urls AS urls
+    ON urls.group_id = groups.id AND urls.service_id = $1
+ORDER BY groups.name
+`
+
+type ListServiceAlternateUrlsRow struct {
+	ID   int64   `json:"id"`
+	Name string  `json:"name"`
+	Url  *string `json:"url"`
+}
+
+func (q *Queries) ListServiceAlternateUrls(ctx context.Context, serviceID string) ([]ListServiceAlternateUrlsRow, error) {
+	rows, err := q.db.Query(ctx, listServiceAlternateUrls, serviceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListServiceAlternateUrlsRow{}
+	for rows.Next() {
+		var i ListServiceAlternateUrlsRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.Url); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listServiceRoleGroups = `-- name: ListServiceRoleGroups :many
@@ -600,7 +700,6 @@ SELECT
     version,
     internal_url,
     public_url,
-    native_apps_url,
     default_role_key,
     database_host,
     database_port,
@@ -626,7 +725,6 @@ type ListServicesRow struct {
 	Version                   string             `json:"version"`
 	InternalUrl               string             `json:"internal_url"`
 	PublicUrl                 string             `json:"public_url"`
-	NativeAppsUrl             *string            `json:"native_apps_url"`
 	DefaultRoleKey            *string            `json:"default_role_key"`
 	DatabaseHost              *string            `json:"database_host"`
 	DatabasePort              *int32             `json:"database_port"`
@@ -659,7 +757,6 @@ func (q *Queries) ListServices(ctx context.Context) ([]ListServicesRow, error) {
 			&i.Version,
 			&i.InternalUrl,
 			&i.PublicUrl,
-			&i.NativeAppsUrl,
 			&i.DefaultRoleKey,
 			&i.DatabaseHost,
 			&i.DatabasePort,
@@ -834,6 +931,43 @@ func (q *Queries) RecordServiceHealthUnavailable(ctx context.Context, arg Record
 	return result.RowsAffected(), nil
 }
 
+const renameAlternateUrlGroup = `-- name: RenameAlternateUrlGroup :execrows
+UPDATE alternate_url_groups
+SET name = $2
+WHERE id = $1
+`
+
+type RenameAlternateUrlGroupParams struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+func (q *Queries) RenameAlternateUrlGroup(ctx context.Context, arg RenameAlternateUrlGroupParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renameAlternateUrlGroup, arg.ID, arg.Name)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setServiceAlternateUrl = `-- name: SetServiceAlternateUrl :exec
+INSERT INTO service_alternate_urls (service_id, group_id, url)
+VALUES ($1, $2, $3)
+ON CONFLICT (service_id, group_id) DO UPDATE
+SET url = EXCLUDED.url
+`
+
+type SetServiceAlternateUrlParams struct {
+	ServiceID string `json:"service_id"`
+	GroupID   int64  `json:"group_id"`
+	Url       string `json:"url"`
+}
+
+func (q *Queries) SetServiceAlternateUrl(ctx context.Context, arg SetServiceAlternateUrlParams) error {
+	_, err := q.db.Exec(ctx, setServiceAlternateUrl, arg.ServiceID, arg.GroupID, arg.Url)
+	return err
+}
+
 const unregisterService = `-- name: UnregisterService :execrows
 UPDATE services
 SET service_token_hash = NULL,
@@ -857,25 +991,18 @@ func (q *Queries) UnregisterService(ctx context.Context, id string) (int64, erro
 const updateServiceConfiguration = `-- name: UpdateServiceConfiguration :execrows
 UPDATE services
 SET public_url = $2,
-    native_apps_url = $3,
-    default_role_key = $4
+    default_role_key = $3
 WHERE id = $1
 `
 
 type UpdateServiceConfigurationParams struct {
 	ID             string  `json:"id"`
 	PublicUrl      string  `json:"public_url"`
-	NativeAppsUrl  *string `json:"native_apps_url"`
 	DefaultRoleKey *string `json:"default_role_key"`
 }
 
 func (q *Queries) UpdateServiceConfiguration(ctx context.Context, arg UpdateServiceConfigurationParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updateServiceConfiguration,
-		arg.ID,
-		arg.PublicUrl,
-		arg.NativeAppsUrl,
-		arg.DefaultRoleKey,
-	)
+	result, err := q.db.Exec(ctx, updateServiceConfiguration, arg.ID, arg.PublicUrl, arg.DefaultRoleKey)
 	if err != nil {
 		return 0, err
 	}

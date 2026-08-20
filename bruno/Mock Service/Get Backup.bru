@@ -1,0 +1,22 @@
+meta {
+  name: Get Backup
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{mockServiceUrl}}/api/core/v1/backup?option=1
+  body: none
+  auth: none
+}
+
+params:query {
+  option: 1
+}
+
+tests {
+  test("returns a backup archive for the requested option", function () {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getHeader("content-disposition")).to.contain("attachment");
+  });
+}

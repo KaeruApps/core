@@ -27,6 +27,17 @@ func NewCoreService(version string, internalURL string, now time.Time) Service {
 	}
 }
 
+// CoreBackupOptions is Kaeru Core's own backup catalog. Core does not call the
+// service protocol against itself, so its single option is defined here.
+func CoreBackupOptions() []BackupOption {
+	return []BackupOption{{
+		ID:          1,
+		Option:      "Full Backup",
+		Default:     true,
+		Description: "Core configuration, the service registry, users, and shared settings.",
+	}}
+}
+
 func CoreRoleCatalog() []RoleDefinition {
 	return []RoleDefinition{
 		{Key: CoreAdminRoleKey, Name: "Administrator", Priority: 100},

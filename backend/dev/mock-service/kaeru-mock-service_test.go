@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
 func TestRoleCatalog(t *testing.T) {
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/system/roles", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/core/v1/system/roles", nil)
 	response := httptest.NewRecorder()
 
 	newHandler().ServeHTTP(response, request)
@@ -30,7 +31,7 @@ func TestRoleCatalog(t *testing.T) {
 }
 
 func TestHealth(t *testing.T) {
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/core/v1/health", nil)
 	response := httptest.NewRecorder()
 
 	newHandler().ServeHTTP(response, request)
@@ -53,7 +54,7 @@ func TestAvailabilityCanBeToggled(t *testing.T) {
 		t.Fatalf("toggle status = %d, body = %s", toggleResponse.Code, toggleResponse.Body.String())
 	}
 
-	healthRequest := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	healthRequest := httptest.NewRequest(http.MethodGet, "/api/core/v1/health", nil)
 	healthResponse := httptest.NewRecorder()
 	handler.ServeHTTP(healthResponse, healthRequest)
 	var health struct {
@@ -68,7 +69,7 @@ func TestAvailabilityCanBeToggled(t *testing.T) {
 }
 
 func TestIcon(t *testing.T) {
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/system/icon", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/core/v1/system/icon", nil)
 	response := httptest.NewRecorder()
 
 	newHandler().ServeHTTP(response, request)
@@ -81,5 +82,64 @@ func TestIcon(t *testing.T) {
 	}
 	if response.Body.Len() < 1000 {
 		t.Fatalf("icon response is unexpectedly small: %d bytes", response.Body.Len())
+	}
+}
+
+func TestBackupOptionsArePublished(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/core/v1/backup/options", nil)
+	recorder := httptest.NewRecorder()
+	newHandler().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	var catalog backupOptionCatalog
+	if err := json.Unmarshal(recorder.Body.Bytes(), &catalog); err != nil {
+		t.Fatalf("decode backup options: %v", err)
+	}
+	if len(catalog.Options) != len(mockBackupOptions) {
+		t.Fatalf("published %d options, want %d", len(catalog.Options), len(mockBackupOptions))
+	}
+	defaults := 0
+	for _, option := range catalog.Options {
+		if option.Default {
+			defaults++
+		}
+	}
+	if defaults != 1 {
+		t.Errorf("published %d default options, want exactly 1", defaults)
+	}
+}
+
+func TestBackupRequiresAKnownOption(t *testing.T) {
+	handler := newHandler()
+	for _, target := range []string{
+		"/api/core/v1/backup",
+		"/api/core/v1/backup?option=",
+		"/api/core/v1/backup?option=abc",
+		"/api/core/v1/backup?option=999",
+	} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, target, nil))
+		if recorder.Code != http.StatusBadRequest {
+			t.Errorf("GET %s status = %d, want %d", target, recorder.Code, http.StatusBadRequest)
+		}
+	}
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/core/v1/backup?option=2", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if !strings.Contains(recorder.Body.String(), "Database Only") {
+		t.Errorf("backup body does not name the requested option: %q", recorder.Body.String())
+	}
+}
+
+func TestBackupCanBeStarted(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	newHandler().ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/core/v1/backup?option=1", nil))
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusAccepted)
 	}
 }

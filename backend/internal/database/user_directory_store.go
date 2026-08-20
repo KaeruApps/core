@@ -20,7 +20,11 @@ func (store *UserDirectoryStore) ListUsers(ctx context.Context) ([]identity.User
 	rows, err := store.pool.Query(ctx, `
 		SELECT id, username, display_name, email,
 		       CASE
-		           WHEN avatar_image IS NOT NULL THEN '/api/v1/users/' || id || '/avatar'
+		           -- The avatar response is cacheable, so the URL carries the row's
+		           -- update time. Without it a replaced avatar keeps serving the
+		           -- cached image until the max-age expires.
+		           WHEN avatar_image IS NOT NULL THEN '/api/v1/users/' || id || '/avatar?v='
+		               || (EXTRACT(EPOCH FROM updated_at) * 1000000)::BIGINT
 		           ELSE oidc_avatar_url
 		       END,
 		       disabled_at IS NOT NULL, created_at, last_login_at, last_seen_at

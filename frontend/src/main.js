@@ -1,4 +1,5 @@
 import { createApp } from "vue";
+import { createPinia } from "pinia";
 import { createVuetify } from "vuetify";
 import {
   VApp,
@@ -103,4 +104,4 @@ const vuetify = createVuetify({
   },
 });
 
-createApp(App).use(router).use(vuetify).mount("#app");
+createApp(App).use(createPinia()).use(router).use(vuetify).mount("#app");

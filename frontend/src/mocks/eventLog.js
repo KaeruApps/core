@@ -1,0 +1,58 @@
+// MOCK: Kaeru Core has no event log API yet. See src/mocks/README.md.
+
+export const recentEvents = [
+  {
+    id: 1,
+    timestamp: "August 9, 2026 at 14:32:08",
+    timestampAt: "2026-08-09T14:32:08+02:00",
+    message: "Upload Archiver came online",
+    service: "Upload Archiver",
+    user: null,
+    tone: "normal",
+  },
+  {
+    id: 2,
+    timestamp: "August 9, 2026 at 14:28:41",
+    timestampAt: "2026-08-09T14:28:41+02:00",
+    message: "Alex Morgan uploaded a file",
+    service: "Upload Archiver",
+    user: "Alex Morgan",
+    tone: "normal",
+  },
+  {
+    id: 3,
+    timestamp: "August 9, 2026 at 13:54:12",
+    timestampAt: "2026-08-09T13:54:12+02:00",
+    message: "Relay went offline",
+    service: "Relay",
+    user: null,
+    tone: "error",
+  },
+  {
+    id: 4,
+    timestamp: "August 9, 2026 at 09:15:03",
+    timestampAt: "2026-08-09T09:15:03+02:00",
+    message: "Sam Rivera connected",
+    service: "Core",
+    user: "Sam Rivera",
+    tone: "normal",
+  },
+  {
+    id: 5,
+    timestamp: "August 9, 2026 at 02:02:19",
+    timestampAt: "2026-08-09T02:02:19+02:00",
+    message: "Platform backup completed",
+    service: "Core",
+    user: null,
+    tone: "normal",
+  },
+  {
+    id: 6,
+    timestamp: "August 8, 2026 at 21:08:47",
+    timestampAt: "2026-08-08T21:08:47+02:00",
+    message: "Jamie Chen queried the service registry",
+    service: "Core",
+    user: "Jamie Chen",
+    tone: "normal",
+  },
+];

@@ -10,7 +10,7 @@ import (
 
 func TestHealthClientChecksAvailability(t *testing.T) {
 	client := &HealthClient{httpClient: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if request.URL.Path != "/api/v1/health" {
+		if request.URL.Path != "/api/core/v1/health" {
 			t.Fatalf("path = %q", request.URL.Path)
 		}
 		return &http.Response{

@@ -28,7 +28,7 @@ func NewHealthClient(timeout time.Duration) *HealthClient {
 }
 
 func (client *HealthClient) Check(ctx context.Context, internalURL string) (bool, error) {
-	endpoint, err := url.JoinPath(internalURL, "/api/v1/health")
+	endpoint, err := url.JoinPath(internalURL, "/api/core/v1/health")
 	if err != nil {
 		return false, fmt.Errorf("build service health URL: %w", err)
 	}

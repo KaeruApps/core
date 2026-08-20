@@ -45,13 +45,12 @@ INSERT INTO services (
     version,
     internal_url,
     public_url,
-    native_apps_url,
     service_token_hash,
     registration_status,
     created_at,
     last_seen_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, 'registering', $10, $11
+    $1, $2, $3, $4, $5, $6, $7, $8, 'registering', $9, $10
 )
 ON CONFLICT (service_type) DO UPDATE
 SET instance_id = EXCLUDED.instance_id,
@@ -74,7 +73,6 @@ RETURNING
     version,
     internal_url,
     public_url,
-    native_apps_url,
     default_role_key,
     database_host,
     database_port,
@@ -131,7 +129,6 @@ ORDER BY roles.priority DESC, groups.role_key, groups.oidc_group;
 -- name: UpdateServiceConfiguration :execrows
 UPDATE services
 SET public_url = $2,
-    native_apps_url = sqlc.narg(native_apps_url),
     default_role_key = sqlc.narg(default_role_key)
 WHERE id = $1;
 
@@ -187,7 +184,6 @@ SELECT
     version,
     internal_url,
     public_url,
-    native_apps_url,
     default_role_key,
     database_host,
     database_port,
@@ -213,7 +209,6 @@ SELECT
     version,
     internal_url,
     public_url,
-    native_apps_url,
     default_role_key,
     role_catalog_refreshed_at,
     role_catalog_refresh_error,
@@ -241,7 +236,6 @@ SELECT
     version,
     internal_url,
     public_url,
-    native_apps_url,
     default_role_key,
     database_host,
     database_port,
@@ -333,3 +327,42 @@ SET content = EXCLUDED.content,
     content_hash = EXCLUDED.content_hash,
     source_etag = EXCLUDED.source_etag,
     fetched_at = EXCLUDED.fetched_at;
+
+-- name: ListAlternateUrlGroups :many
+SELECT id, name
+FROM alternate_url_groups
+ORDER BY name;
+
+-- name: CreateAlternateUrlGroup :one
+INSERT INTO alternate_url_groups (name, created_at)
+VALUES ($1, $2)
+RETURNING id;
+
+-- name: RenameAlternateUrlGroup :execrows
+UPDATE alternate_url_groups
+SET name = $2
+WHERE id = $1;
+
+-- name: DeleteAlternateUrlGroupsExcept :exec
+DELETE FROM alternate_url_groups
+WHERE NOT (id = ANY(@kept_ids::BIGINT[]));
+
+-- name: DeleteAllAlternateUrlGroups :exec
+DELETE FROM alternate_url_groups;
+
+-- name: ListServiceAlternateUrls :many
+SELECT groups.id, groups.name, urls.url
+FROM alternate_url_groups AS groups
+LEFT JOIN service_alternate_urls AS urls
+    ON urls.group_id = groups.id AND urls.service_id = $1
+ORDER BY groups.name;
+
+-- name: DeleteServiceAlternateUrls :exec
+DELETE FROM service_alternate_urls
+WHERE service_id = $1;
+
+-- name: SetServiceAlternateUrl :exec
+INSERT INTO service_alternate_urls (service_id, group_id, url)
+VALUES ($1, $2, $3)
+ON CONFLICT (service_id, group_id) DO UPDATE
+SET url = EXCLUDED.url;

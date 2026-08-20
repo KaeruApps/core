@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/KaeruApps/core/internal/database/dbsqlc"
@@ -56,11 +57,6 @@ func (store *RegistryStore) ClaimRegistration(ctx context.Context, service regis
 		return registry.RegistrationClaim{}, fmt.Errorf("check service instance registration: %w", err)
 	}
 
-	var nativeAppsURL *string
-	if service.NativeAppsURL != "" {
-		nativeAppsURL = &service.NativeAppsURL
-	}
-
 	row, err := store.queries.ClaimServiceRegistration(ctx, dbsqlc.ClaimServiceRegistrationParams{
 		ID:               service.ID,
 		ServiceType:      service.ServiceType,
@@ -69,7 +65,6 @@ func (store *RegistryStore) ClaimRegistration(ctx context.Context, service regis
 		Version:          service.Version,
 		InternalUrl:      service.InternalURL,
 		PublicUrl:        service.PublicURL,
-		NativeAppsUrl:    nativeAppsURL,
 		ServiceTokenHash: tokenHash[:],
 		CreatedAt:        timestamptz(service.CreatedAt),
 		LastSeenAt:       timestamptz(service.LastSeenAt),
@@ -92,7 +87,6 @@ func (store *RegistryStore) ClaimRegistration(ctx context.Context, service regis
 		Version:            row.Version,
 		InternalURL:        row.InternalUrl,
 		PublicURL:          row.PublicUrl,
-		NativeAppsURL:      stringValue(row.NativeAppsUrl),
 		DefaultRoleKey:     row.DefaultRoleKey,
 		DatabaseHost:       stringValue(row.DatabaseHost),
 		DatabasePort:       uint16Value(row.DatabasePort),
@@ -146,7 +140,6 @@ func (store *RegistryStore) ListServices(ctx context.Context) ([]registry.Servic
 			Version:            row.Version,
 			InternalURL:        row.InternalUrl,
 			PublicURL:          row.PublicUrl,
-			NativeAppsURL:      stringValue(row.NativeAppsUrl),
 			DefaultRoleKey:     row.DefaultRoleKey,
 			DatabaseHost:       stringValue(row.DatabaseHost),
 			DatabasePort:       uint16Value(row.DatabasePort),
@@ -184,6 +177,11 @@ func (store *RegistryStore) GetService(ctx context.Context, serviceID string) (r
 		return registry.ServiceDetails{}, fmt.Errorf("list service role groups: %w", err)
 	}
 
+	alternates, err := store.listServiceAlternateURLs(ctx, store.queries, serviceID)
+	if err != nil {
+		return registry.ServiceDetails{}, err
+	}
+
 	mappings := make([]registry.ServiceRoleMapping, 0)
 	for _, group := range groupRows {
 		if len(mappings) == 0 || mappings[len(mappings)-1].RoleKey != group.RoleKey {
@@ -201,7 +199,6 @@ func (store *RegistryStore) GetService(ctx context.Context, serviceID string) (r
 			Version:            row.Version,
 			InternalURL:        row.InternalUrl,
 			PublicURL:          row.PublicUrl,
-			NativeAppsURL:      stringValue(row.NativeAppsUrl),
 			DefaultRoleKey:     row.DefaultRoleKey,
 			DatabaseHost:       stringValue(row.DatabaseHost),
 			DatabasePort:       uint16Value(row.DatabasePort),
@@ -216,9 +213,10 @@ func (store *RegistryStore) GetService(ctx context.Context, serviceID string) (r
 			CreatedAt:          timeValue(row.CreatedAt),
 			LastSeenAt:         timeValue(row.LastSeenAt),
 		},
-		Roles:        roles,
-		RoleMappings: mappings,
-		RoleCatalog:  roleCatalogState(row.RoleCatalogRefreshedAt, row.RoleCatalogRefreshError),
+		AlternateURLs: alternates,
+		Roles:         roles,
+		RoleMappings:  mappings,
+		RoleCatalog:   roleCatalogState(row.RoleCatalogRefreshedAt, row.RoleCatalogRefreshError),
 	}, nil
 }
 
@@ -322,11 +320,9 @@ func (store *RegistryStore) UpdateService(ctx context.Context, serviceID string,
 	} else if err != nil {
 		return registry.ServiceDetails{}, fmt.Errorf("load service type: %w", err)
 	}
-	nativeAppsURL := nullableString(input.NativeAppsURL)
 	rowsAffected, err := queries.UpdateServiceConfiguration(ctx, dbsqlc.UpdateServiceConfigurationParams{
 		ID:             serviceID,
 		PublicUrl:      input.PublicURL,
-		NativeAppsUrl:  nativeAppsURL,
 		DefaultRoleKey: input.DefaultRoleKey,
 	})
 	if err != nil {
@@ -343,6 +339,9 @@ func (store *RegistryStore) UpdateService(ctx context.Context, serviceID string,
 		`, input.PublicURL); err != nil {
 			return registry.ServiceDetails{}, fmt.Errorf("synchronize Kaeru Core access URL: %w", err)
 		}
+	}
+	if err := store.applyAlternateURLs(ctx, queries, serviceID, serviceType, input.AlternateURLs); err != nil {
+		return registry.ServiceDetails{}, err
 	}
 	if err := queries.DeleteServiceRoleGroups(ctx, serviceID); err != nil {
 		return registry.ServiceDetails{}, fmt.Errorf("replace service role mappings: %w", err)
@@ -408,7 +407,6 @@ func (store *RegistryStore) FindByInstanceID(ctx context.Context, instanceID str
 		Version:            row.Version,
 		InternalURL:        row.InternalUrl,
 		PublicURL:          row.PublicUrl,
-		NativeAppsURL:      stringValue(row.NativeAppsUrl),
 		DefaultRoleKey:     row.DefaultRoleKey,
 		DatabaseHost:       stringValue(row.DatabaseHost),
 		DatabasePort:       uint16Value(row.DatabasePort),
@@ -534,6 +532,13 @@ func (store *RegistryStore) RecordHealthFailure(ctx context.Context, serviceID s
 	return nil
 }
 
+// isUniqueViolation reports a duplicate key, which alternate URL group names
+// surface as a conflict rather than an internal error.
+func isUniqueViolation(err error) bool {
+	var postgresError *pgconn.PgError
+	return errors.As(err, &postgresError) && postgresError.Code == "23505"
+}
+
 func isInstanceIDConflict(err error) bool {
 	var postgresError *pgconn.PgError
 	return errors.As(err, &postgresError) &&
@@ -602,4 +607,110 @@ func uint16Value(value *int32) uint16 {
 		return 0
 	}
 	return uint16(*value)
+}
+
+// applyAlternateURLs writes a service's alternate URLs.
+//
+// Kaeru Core owns the group list, so a Core update also creates, renames, and
+// removes groups to match what was submitted. Any other service may only set
+// its own URL against groups that already exist.
+func (store *RegistryStore) applyAlternateURLs(
+	ctx context.Context,
+	queries *dbsqlc.Queries,
+	serviceID string,
+	serviceType string,
+	inputs []registry.AlternateURLInput,
+) error {
+	if serviceType == registry.CoreServiceType {
+		if err := store.reconcileAlternateURLGroups(ctx, queries, inputs); err != nil {
+			return err
+		}
+	}
+
+	if err := queries.DeleteServiceAlternateUrls(ctx, serviceID); err != nil {
+		return fmt.Errorf("replace service alternate URLs: %w", err)
+	}
+	for _, input := range inputs {
+		url := strings.TrimSpace(input.URL)
+		if url == "" || input.GroupID == 0 {
+			continue
+		}
+		if err := queries.SetServiceAlternateUrl(ctx, dbsqlc.SetServiceAlternateUrlParams{
+			ServiceID: serviceID,
+			GroupID:   input.GroupID,
+			Url:       url,
+		}); err != nil {
+			return fmt.Errorf("set service alternate URL: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// reconcileAlternateURLGroups makes the stored groups match Core's submission,
+// assigning identifiers to newly created groups in place.
+func (store *RegistryStore) reconcileAlternateURLGroups(
+	ctx context.Context,
+	queries *dbsqlc.Queries,
+	inputs []registry.AlternateURLInput,
+) error {
+	now := time.Now().UTC()
+	keptIDs := make([]int64, 0, len(inputs))
+	for index := range inputs {
+		name := strings.TrimSpace(inputs[index].Group)
+		if inputs[index].GroupID == 0 {
+			groupID, err := queries.CreateAlternateUrlGroup(ctx, dbsqlc.CreateAlternateUrlGroupParams{
+				Name:      name,
+				CreatedAt: timestamptz(now),
+			})
+			if err != nil {
+				if isUniqueViolation(err) {
+					return &registry.ValidationError{Field: "alternate_urls", Message: fmt.Sprintf("alternate URL group %q already exists", name)}
+				}
+				return fmt.Errorf("create alternate URL group: %w", err)
+			}
+			inputs[index].GroupID = groupID
+		} else if _, err := queries.RenameAlternateUrlGroup(ctx, dbsqlc.RenameAlternateUrlGroupParams{
+			ID:   inputs[index].GroupID,
+			Name: name,
+		}); err != nil {
+			if isUniqueViolation(err) {
+				return &registry.ValidationError{Field: "alternate_urls", Message: fmt.Sprintf("alternate URL group %q already exists", name)}
+			}
+			return fmt.Errorf("rename alternate URL group: %w", err)
+		}
+		keptIDs = append(keptIDs, inputs[index].GroupID)
+	}
+
+	// Removing a group removes it from every service, which the foreign key
+	// cascade takes care of.
+	if len(keptIDs) == 0 {
+		if err := queries.DeleteAllAlternateUrlGroups(ctx); err != nil {
+			return fmt.Errorf("remove alternate URL groups: %w", err)
+		}
+		return nil
+	}
+	if err := queries.DeleteAlternateUrlGroupsExcept(ctx, keptIDs); err != nil {
+		return fmt.Errorf("remove alternate URL groups: %w", err)
+	}
+
+	return nil
+}
+
+// listServiceAlternateURLs returns every group with this service's URL for it,
+// leaving the URL empty where the service has not supplied one.
+func (store *RegistryStore) listServiceAlternateURLs(ctx context.Context, queries *dbsqlc.Queries, serviceID string) ([]registry.ServiceAlternateURL, error) {
+	rows, err := queries.ListServiceAlternateUrls(ctx, serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("list service alternate URLs: %w", err)
+	}
+	alternates := make([]registry.ServiceAlternateURL, len(rows))
+	for index, row := range rows {
+		alternates[index] = registry.ServiceAlternateURL{
+			GroupID: row.ID,
+			Group:   row.Name,
+			URL:     stringValue(row.Url),
+		}
+	}
+	return alternates, nil
 }

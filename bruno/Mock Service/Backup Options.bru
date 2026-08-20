@@ -1,0 +1,37 @@
+meta {
+  name: Backup Options
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{mockServiceUrl}}/api/core/v1/backup/options
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+tests {
+  test("publishes a usable backup option catalog", function () {
+    const body = res.getBody();
+
+    expect(res.getStatus()).to.equal(200);
+    expect(body.options).to.be.an("array").that.is.not.empty;
+
+    const identifiers = new Set();
+    for (const option of body.options) {
+      expect(option.id).to.be.a("number").above(0);
+      expect(option.option).to.be.a("string").that.is.not.empty;
+      expect(option.default).to.be.a("boolean");
+      expect(option.description).to.be.a("string");
+      expect(identifiers.has(option.id), "option ids must be unique").to.equal(false);
+      identifiers.add(option.id);
+    }
+
+    const defaults = body.options.filter((option) => option.default);
+    expect(defaults.length, "at most one option may be the default").to.be.at.most(1);
+  });
+}

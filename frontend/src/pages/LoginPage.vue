@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
-import oidcFallbackIcon from "../assets/oidc.png";
+import SetupHeading from "../components/layout/SetupHeading.vue";
 
 const route = useRoute();
 const startingLogin = ref(false);
@@ -13,10 +13,13 @@ const branding = ref({
 });
 const brandingImageFailed = ref(false);
 const providerError = computed(() => typeof route.query.error === "string" ? route.query.error : "");
-const brandingImage = computed(() => (
+// The provider button shows a configured branding image or nothing at all.
+// There is no generic fallback icon: a missing or broken image leaves a
+// text-only button rather than branding the provider incorrectly.
+const brandingImageUrl = computed(() => (
   branding.value.button_image_configured && !brandingImageFailed.value
     ? "/api/v1/auth/oidc/button-image"
-    : oidcFallbackIcon
+    : null
 ));
 
 onMounted(async () => {
@@ -53,13 +56,11 @@ async function login() {
 <template>
   <v-container class="setup-page login-page">
     <section class="setup-panel login-panel" aria-labelledby="login-title">
-      <div class="setup-heading">
-        <span class="setup-app-icon" aria-hidden="true" />
-        <div>
-          <h1 id="login-title">Log in to Kaeru</h1>
-          <p>Use your configured identity provider to continue.</p>
-        </div>
-      </div>
+      <SetupHeading
+        title-id="login-title"
+        title="Log in to Kaeru"
+        subtitle="Use your configured identity provider to continue."
+      />
 
       <div class="login-actions">
         <p v-if="providerError || loginError" class="oidc-setup-error" role="alert">
@@ -74,7 +75,8 @@ async function login() {
           @click="login"
         >
           <img
-            :src="brandingImage"
+            v-if="brandingImageUrl"
+            :src="brandingImageUrl"
             alt=""
             class="login-provider-icon"
             @error="brandingImageFailed = true"
@@ -85,3 +87,22 @@ async function login() {
     </section>
   </v-container>
 </template>
+
+<style scoped>
+.login-panel {
+  width: min(100%, 34rem);
+}
+
+.login-actions {
+  display: grid;
+  gap: 20px;
+}
+
+.login-provider-icon {
+  border-radius: 4px;
+  height: 24px;
+  margin-right: 10px;
+  object-fit: cover;
+  width: 24px;
+}
+</style>

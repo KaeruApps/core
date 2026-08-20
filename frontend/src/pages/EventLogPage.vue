@@ -3,67 +3,13 @@ import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { mdiMagnify } from "@mdi/js";
 
+// MOCK-BACKED: Kaeru Core has no event log API yet. See src/mocks/README.md.
+import { recentEvents } from "../mocks/eventLog.js";
+
 const route = useRoute();
 const searchQuery = ref("");
 const selectedService = ref("Any Service");
 const selectedUser = ref("Any User");
-
-const recentEvents = [
-  {
-    id: 1,
-    timestamp: "August 9, 2026 at 14:32:08",
-    timestampAt: "2026-08-09T14:32:08+02:00",
-    message: "Upload Archiver came online",
-    service: "Upload Archiver",
-    user: null,
-    tone: "normal",
-  },
-  {
-    id: 2,
-    timestamp: "August 9, 2026 at 14:28:41",
-    timestampAt: "2026-08-09T14:28:41+02:00",
-    message: "Alex Morgan uploaded a file",
-    service: "Upload Archiver",
-    user: "Alex Morgan",
-    tone: "normal",
-  },
-  {
-    id: 3,
-    timestamp: "August 9, 2026 at 13:54:12",
-    timestampAt: "2026-08-09T13:54:12+02:00",
-    message: "Relay went offline",
-    service: "Relay",
-    user: null,
-    tone: "error",
-  },
-  {
-    id: 4,
-    timestamp: "August 9, 2026 at 09:15:03",
-    timestampAt: "2026-08-09T09:15:03+02:00",
-    message: "Sam Rivera connected",
-    service: "Core",
-    user: "Sam Rivera",
-    tone: "normal",
-  },
-  {
-    id: 5,
-    timestamp: "August 9, 2026 at 02:02:19",
-    timestampAt: "2026-08-09T02:02:19+02:00",
-    message: "Platform backup completed",
-    service: "Core",
-    user: null,
-    tone: "normal",
-  },
-  {
-    id: 6,
-    timestamp: "August 8, 2026 at 21:08:47",
-    timestampAt: "2026-08-08T21:08:47+02:00",
-    message: "Jamie Chen queried the service registry",
-    service: "Core",
-    user: "Jamie Chen",
-    tone: "normal",
-  },
-];
 
 const serviceOptions = [
   "Any Service",
@@ -153,3 +99,91 @@ const filteredEvents = computed(() => {
     </v-sheet>
   </v-container>
 </template>
+
+<style scoped>
+.event-log {
+  max-height: min(960px, calc(100vh - 160px));
+  overflow-y: auto;
+  background: rgb(var(--v-theme-surface));
+}
+
+.event-log-panel {
+  overflow: hidden;
+  background: rgb(var(--v-theme-surface));
+}
+
+.event-log-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.1);
+}
+
+.event-log-search {
+  grid-column: 1 / -1;
+}
+
+.event-log-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event-log-entry {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.3fr) minmax(0, 1fr);
+  gap: 24px;
+  padding: 16px 24px;
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.event-log-entry:last-child {
+  border-bottom: 0;
+}
+
+.event-log-timestamp {
+  color: rgba(var(--v-theme-on-surface), 0.58);
+  font-variant-numeric: tabular-nums;
+}
+
+.event-log-message {
+  color: rgba(var(--v-theme-on-surface), 0.9);
+}
+
+.event-log-entry--error .event-log-message {
+  color: rgb(var(--v-theme-error));
+}
+
+.event-log-empty {
+  padding: 24px;
+  color: rgba(var(--v-theme-on-surface), 0.62);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.page-title {
+  margin: 0 0 24px;
+  color: rgb(var(--v-theme-on-background));
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+@media (max-width: 600px) {
+  .event-log {
+    max-height: calc(100vh - 120px);
+  }
+
+  .event-log-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .event-log-entry {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+</style>

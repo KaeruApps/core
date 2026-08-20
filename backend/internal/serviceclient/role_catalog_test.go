@@ -21,7 +21,7 @@ func testClient(handler roundTripFunc) *RoleCatalogClient {
 
 func TestRoleCatalogClientFetchesRoles(t *testing.T) {
 	client := testClient(func(request *http.Request) (*http.Response, error) {
-		if request.URL.Path != "/api/v1/system/roles" {
+		if request.URL.Path != "/api/core/v1/system/roles" {
 			t.Fatalf("path = %q", request.URL.Path)
 		}
 		return &http.Response{

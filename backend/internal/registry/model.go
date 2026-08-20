@@ -11,7 +11,6 @@ type Service struct {
 	Version            string     `json:"version"`
 	InternalURL        string     `json:"internal_url"`
 	PublicURL          string     `json:"public_url"`
-	NativeAppsURL      string     `json:"native_apps_url,omitempty"`
 	DefaultRoleKey     *string    `json:"default_role_key"`
 	DatabaseHost       string     `json:"database_host,omitempty"`
 	DatabasePort       uint16     `json:"database_port,omitempty"`
@@ -52,33 +51,73 @@ type RoleCatalogState struct {
 	Stale       bool       `json:"stale"`
 }
 
+// BackupOption is one kind of backup a service can produce, published by the
+// service at /api/core/v1/backup/options.
+type BackupOption struct {
+	ID          int32  `json:"id"`
+	Option      string `json:"option"`
+	Default     bool   `json:"default"`
+	Description string `json:"description"`
+}
+
+type BackupOptionsResponse struct {
+	Options []BackupOption `json:"options"`
+}
+
 type ServiceRoleMapping struct {
 	RoleKey    string   `json:"role_key"`
 	OIDCGroups []string `json:"oidc_groups"`
 }
 
+// AlternateURLGroup is a named way of reaching the platform, defined once by
+// Kaeru Core. Each service may publish its own URL for the group.
+type AlternateURLGroup struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// ServiceAlternateURL is one group as it applies to a single service. URL is
+// empty when the service has not supplied one, in which case callers fall back
+// to the service's public URL.
+type ServiceAlternateURL struct {
+	GroupID int64  `json:"group_id"`
+	Group   string `json:"group"`
+	URL     string `json:"url"`
+}
+
+// AlternateURLInput is a single alternate URL as submitted by the UI. GroupID
+// is zero for a group Kaeru Core is creating for the first time.
+type AlternateURLInput struct {
+	GroupID int64  `json:"group_id"`
+	Group   string `json:"group"`
+	URL     string `json:"url"`
+}
+
 type ServiceDetails struct {
 	Service
-	Roles        []ServiceRole        `json:"roles"`
-	RoleMappings []ServiceRoleMapping `json:"role_mappings"`
-	RoleCatalog  RoleCatalogState     `json:"role_catalog"`
+	AlternateURLs []ServiceAlternateURL `json:"alternate_urls"`
+	Roles         []ServiceRole         `json:"roles"`
+	RoleMappings  []ServiceRoleMapping  `json:"role_mappings"`
+	RoleCatalog   RoleCatalogState      `json:"role_catalog"`
 }
 
 type UpdateServiceInput struct {
 	PublicURL      string               `json:"public_url"`
-	NativeAppsURL  *string              `json:"native_apps_url"`
 	DefaultRoleKey *string              `json:"default_role_key"`
 	RoleMappings   []ServiceRoleMapping `json:"role_mappings"`
+	AlternateURLs  []AlternateURLInput  `json:"alternate_urls"`
 }
 
-// ResolvedNativeAppsURL returns the native-app URL when configured and falls
-// back to the regular public URL otherwise.
-func (service Service) ResolvedNativeAppsURL() string {
-	if service.NativeAppsURL != "" {
-		return service.NativeAppsURL
+// ResolveAlternateURL returns the service's URL for an alternate URL group,
+// falling back to its public URL when the service has not supplied one.
+func (details ServiceDetails) ResolveAlternateURL(groupID int64) string {
+	for _, alternate := range details.AlternateURLs {
+		if alternate.GroupID == groupID && alternate.URL != "" {
+			return alternate.URL
+		}
 	}
 
-	return service.PublicURL
+	return details.PublicURL
 }
 
 type RegistrationInput struct {

@@ -5,6 +5,7 @@ import EventLogPage from "./pages/EventLogPage.vue";
 import SetupPage from "./pages/SetupPage.vue";
 import OIDCSetupPage from "./pages/OIDCSetupPage.vue";
 import LoginPage from "./pages/LoginPage.vue";
+import { useSessionStore } from "./stores/session.js";
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -20,12 +21,12 @@ export const router = createRouter({
       component: EventLogPage,
     },
     {
-	  path: "/login",
-	  name: "login",
-	  component: LoginPage,
-	  meta: { authentication: true },
-	},
-	{
+      path: "/login",
+      name: "login",
+      component: LoginPage,
+      meta: { authentication: true },
+    },
+    {
       path: "/setup",
       name: "setup",
       component: SetupPage,
@@ -40,54 +41,39 @@ export const router = createRouter({
   ],
 });
 
+const administratorRevokedMessage =
+  "Your account no longer has Kaeru Core administrator access. You have been logged out.";
+
 router.beforeEach(async (to) => {
+  const session = useSessionStore();
   try {
-    const response = await fetch("/api/v1/setup/status", {
-      headers: { Accept: "application/json" },
-    });
-    if (!response.ok) {
+    await session.refreshStatus();
+    if (session.initialized) {
+      window.sessionStorage.removeItem("kaeru.oidc-setup-draft");
+    }
+    if (!session.initialized && !to.meta.setup) {
+      return { name: "setup" };
+    }
+    if (session.initialized && to.meta.setup) {
+      return { name: "home" };
+    }
+    if (!session.initialized) {
       return true;
     }
 
-    const status = await response.json();
-    if (status.initialized) {
-      window.sessionStorage.removeItem("kaeru.oidc-setup-draft");
-    }
-    if (!status.initialized && !to.meta.setup) {
-      return { name: "setup" };
-    }
-    if (status.initialized && to.meta.setup) {
-      return { name: "home" };
-    }
-    if (status.initialized) {
-      const sessionResponse = await fetch("/api/v1/session", {
-        headers: { Accept: "application/json" },
-      });
-      const authenticated = sessionResponse.ok;
-      const session = authenticated ? await sessionResponse.json() : null;
-      const coreAdministrator = session?.user?.service_roles?.core === "admin";
-      if (authenticated && !coreAdministrator) {
-        await fetch("/api/v1/session/logout", {
-          method: "POST",
-          headers: { Accept: "application/json" },
-        });
-        if (!to.meta.authentication) {
-          return {
-            name: "login",
-            query: {
-              error: "Your account no longer has Kaeru Core administrator access. You have been logged out.",
-            },
-          };
-        }
-        return true;
+    const authenticated = await session.refreshSession();
+    if (authenticated && !session.isCoreAdministrator()) {
+      await session.logoutQuietly();
+      if (!to.meta.authentication) {
+        return { name: "login", query: { error: administratorRevokedMessage } };
       }
-      if (!authenticated && !to.meta.authentication) {
-        return { name: "login", query: { redirect: to.fullPath } };
-      }
-      if (authenticated && to.meta.authentication) {
-        const redirect = typeof to.query.redirect === "string" ? to.query.redirect : "/";
-        return redirect;
-      }
+      return true;
+    }
+    if (!authenticated && !to.meta.authentication) {
+      return { name: "login", query: { redirect: to.fullPath } };
+    }
+    if (authenticated && to.meta.authentication) {
+      return typeof to.query.redirect === "string" ? to.query.redirect : "/";
     }
   } catch {
     // Pages handle Core availability errors after navigation.

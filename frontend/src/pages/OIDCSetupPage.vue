@@ -2,6 +2,7 @@
 import { nextTick, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import OIDCConfigurationForm from "../components/OIDCConfigurationForm.vue";
+import SetupHeading from "../components/layout/SetupHeading.vue";
 
 const route = useRoute();
 const setupDraftStorageKey = "kaeru.oidc-setup-draft";
@@ -18,7 +19,7 @@ const oidcConfiguration = ref({
   avatarClaim: "",
   groupsClaim: "groups",
   adminGroups: "",
-  buttonText: "Sign in with OIDC",
+  buttonText: "Log in with OIDC",
 });
 const buttonImage = ref(null);
 const setupError = ref("");
@@ -153,13 +154,11 @@ async function beginOIDCLogin() {
 <template>
   <v-container class="setup-page">
     <section class="setup-panel" aria-labelledby="oidc-setup-title">
-      <div class="setup-heading">
-        <span class="setup-app-icon" aria-hidden="true" />
-        <div>
-          <h1 id="oidc-setup-title">Set up OIDC</h1>
-          <p>Connect Kaeru to your OpenID Connect identity provider.</p>
-        </div>
-      </div>
+      <SetupHeading
+        title-id="oidc-setup-title"
+        title="Set up OIDC"
+        subtitle="Connect Kaeru to your OpenID Connect identity provider."
+      />
 
       <v-card class="oidc-setup-card" rounded="lg" variant="outlined">
         <form class="oidc-setup-form" novalidate @submit.prevent="beginOIDCLogin">
@@ -191,3 +190,31 @@ async function beginOIDCLogin() {
     </section>
   </v-container>
 </template>
+
+<style scoped>
+.oidc-setup-card {
+  background: rgb(var(--v-theme-surface));
+}
+
+.oidc-setup-fields {
+  display: grid;
+  gap: 1.5rem;
+  padding: clamp(1.25rem, 4vw, 2rem);
+}
+
+.oidc-setup-actions {
+  padding: 0 clamp(1.25rem, 4vw, 2rem) clamp(1.25rem, 4vw, 2rem);
+}
+
+@media (max-width: 600px) {
+  .oidc-setup-fields {
+    padding-right: 24px;
+    padding-left: 24px;
+  }
+
+  .oidc-setup-actions {
+    padding-right: 24px;
+    padding-left: 24px;
+  }
+}
+</style>

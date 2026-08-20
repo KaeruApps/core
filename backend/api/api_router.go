@@ -22,6 +22,10 @@ type ServiceConfigurationManager interface {
 	Unregister(context.Context, string) (registry.ServiceDetails, error)
 }
 
+type BackupOptionsDirectory interface {
+	List(context.Context) ([]registry.ServiceBackupOptions, error)
+}
+
 type ServiceIconManager interface {
 	Get(context.Context, string) (registry.ServiceIcon, error)
 }
@@ -73,6 +77,7 @@ type Dependencies struct {
 	ServiceRegistrar            ServiceRegistrar
 	ServiceConfigurationManager ServiceConfigurationManager
 	ServiceIconManager          ServiceIconManager
+	BackupOptionsDirectory      BackupOptionsDirectory
 	InstallationState           installation.StateReader
 	OIDCSetupManager            OIDCSetupManager
 	OIDCLoginManager            OIDCLoginManager
@@ -133,6 +138,7 @@ func NewRouter(dependencies Dependencies) http.Handler {
 					administratorRouter.Get("/oidc/settings/button-image", getOIDCButtonImage(dependencies.OIDCSettingsManager))
 					administratorRouter.Put("/oidc/settings", updateOIDCSettings(dependencies.OIDCSettingsManager))
 					administratorRouter.Post("/oidc/settings/verify", verifyOIDCSettings(dependencies.OIDCSettingsManager))
+					administratorRouter.Get("/backup/options", listBackupOptions(dependencies.BackupOptionsDirectory))
 					administratorRouter.Get("/services", listServices(dependencies.ServiceConfigurationManager))
 					administratorRouter.Get("/services/{serviceID}", getService(dependencies.ServiceConfigurationManager))
 					administratorRouter.Get("/services/{serviceID}/icon", getServiceIcon(dependencies.ServiceIconManager))

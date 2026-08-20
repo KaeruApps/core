@@ -1,0 +1,39 @@
+meta {
+  name: Backup Options
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{baseUrl}}/api/v1/backup/options
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+tests {
+  test("lists every service that can take part in a backup", function () {
+    const body = res.getBody();
+
+    expect(res.getStatus()).to.equal(200);
+    expect(body).to.be.an("array").that.is.not.empty;
+
+    const core = body[0];
+    expect(core.service_type, "Kaeru Core is always listed first").to.equal("core");
+    expect(core.available).to.equal(true);
+    expect(core.options).to.have.lengthOf(1);
+    expect(core.options[0].option).to.equal("Full Backup");
+
+    for (const service of body) {
+      expect(service.service_id).to.be.a("string").that.is.not.empty;
+      expect(service.service_name).to.be.a("string").that.is.not.empty;
+      expect(service.options).to.be.an("array");
+      if (!service.available) {
+        expect(service.unavailable_reason).to.be.a("string").that.is.not.empty;
+      }
+    }
+  });
+}

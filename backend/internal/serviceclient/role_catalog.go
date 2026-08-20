@@ -29,7 +29,7 @@ func NewRoleCatalogClient(timeout time.Duration) *RoleCatalogClient {
 }
 
 func (client *RoleCatalogClient) Fetch(ctx context.Context, internalURL string) ([]registry.RoleDefinition, error) {
-	endpoint, err := url.JoinPath(internalURL, "/api/v1/system/roles")
+	endpoint, err := url.JoinPath(internalURL, "/api/core/v1/system/roles")
 	if err != nil {
 		return nil, fmt.Errorf("build service role catalog URL: %w", err)
 	}

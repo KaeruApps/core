@@ -1,0 +1,21 @@
+meta {
+  name: Get Backup Unknown Option
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{mockServiceUrl}}/api/core/v1/backup?option=999
+  body: none
+  auth: none
+}
+
+params:query {
+  option: 999
+}
+
+tests {
+  test("rejects an option the service does not publish", function () {
+    expect(res.getStatus()).to.equal(400);
+  });
+}

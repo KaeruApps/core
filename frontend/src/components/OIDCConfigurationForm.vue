@@ -54,7 +54,7 @@ function removeAccessUrl(index) {
     </label>
     <p class="backup-field-help">URL used to access Kaeru Core</p>
     <v-text-field id="oidc-public-url" v-model="configuration.publicUrl" autocomplete="url" hide-details="auto" placeholder="https://kaeru.example.com" required type="url" variant="outlined" />
-    <p class="oidc-callback-url-help">Your callback URL is <strong>{{ callbackUrl }}</strong></p>
+    <p class="oidc-callback-url-help">Your redirect/callback URL is <strong>{{ callbackUrl }}</strong></p>
   </div>
 
   <div v-else class="setup-form-field">
@@ -169,7 +169,7 @@ function removeAccessUrl(index) {
   <div class="setup-form-field">
     <label for="oidc-button-text" class="service-field-label">Button Text <span class="required-field-marker" aria-hidden="true">*</span></label>
     <p class="backup-field-help">Text displayed on the login button</p>
-    <v-text-field id="oidc-button-text" v-model="configuration.buttonText" hide-details="auto" placeholder="Sign in with OIDC" required variant="outlined" />
+    <v-text-field id="oidc-button-text" v-model="configuration.buttonText" hide-details="auto" placeholder="Log in with OIDC" required variant="outlined" />
   </div>
 
   <div class="setup-form-field">
@@ -180,3 +180,55 @@ function removeAccessUrl(index) {
     <v-file-input id="oidc-button-image" v-model="buttonImage" accept=".jpg,.jpeg,.png,image/jpeg,image/png" clearable hide-details="auto" :placeholder="props.existingButtonImage ? 'Leave empty to keep current picture' : 'Choose an image'" prepend-icon="" :prepend-inner-icon="mdiCamera" :rules="imageRules" variant="outlined" show-size persistent-placeholder />
   </div>
 </template>
+
+<style scoped>
+.setup-form-field .service-field-label,
+.setup-form-field .backup-field-help {
+  display: block;
+}
+
+.setup-form-field,
+.setup-form-field :deep(.v-input) {
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
+}
+
+.setup-form-field .service-field-label {
+  color: rgb(var(--v-theme-primary));
+}
+
+.oidc-access-url-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.oidc-access-url-row {
+  align-items: center;
+  display: grid;
+  gap: 0.35rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.oidc-access-url-remove {
+  flex: 0 0 auto;
+}
+
+.oidc-add-access-url {
+  margin-top: 0.45rem;
+}
+
+.oidc-callback-url-help {
+  color: rgba(var(--v-theme-on-surface), 0.68);
+  margin: 0.65rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.oidc-callback-url-help strong {
+  color: rgb(var(--v-theme-on-surface));
+}
+
+.required-field-marker {
+  color: rgb(var(--v-theme-error));
+}
+</style>

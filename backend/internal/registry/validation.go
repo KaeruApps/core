@@ -13,6 +13,9 @@ const (
 	maxNameLength        = 128
 	maxVersionLength     = 64
 	maxURLLength         = 2048
+
+	maxAlternateURLGroups    = 50
+	maxAlternateURLGroupName = 64
 )
 
 var (
@@ -51,43 +54,101 @@ func ValidateRegistration(input RegistrationInput) error {
 	if strings.TrimSpace(input.Version) == "" || len(input.Version) > maxVersionLength {
 		return invalid("version", "is required and must be at most 64 characters")
 	}
-	if err := validateHTTPURL(input.InternalURL, false); err != nil {
+	if err := validateHTTPURL("Internal URL", input.InternalURL, false); err != nil {
 		return invalid("internal_url", err.Error())
 	}
 	return nil
 }
 
-func ValidateAccessURLs(publicURL string, nativeAppsURL string) error {
-	if err := validateHTTPURL(publicURL, false); err != nil {
+func ValidatePublicURL(publicURL string) error {
+	if err := validateHTTPURL("Application URL", publicURL, false); err != nil {
 		return invalid("public_url", err.Error())
-	}
-	if err := validateHTTPURL(nativeAppsURL, true); err != nil {
-		return invalid("native_apps_url", err.Error())
 	}
 
 	return nil
 }
 
-func validateHTTPURL(value string, optional bool) error {
+// ValidateAlternateURLs checks a service's alternate URL submission.
+//
+// Kaeru Core owns the group list, so only Core may name groups or introduce
+// new ones. Every other service submits a URL against a group that already
+// exists and may leave it empty to fall back to its public URL.
+func ValidateAlternateURLs(inputs []AlternateURLInput, isCore bool, knownGroups map[int64]string) error {
+	if len(inputs) > maxAlternateURLGroups {
+		return invalid("alternate_urls", fmt.Sprintf("There can be at most %d alternate URL groups.", maxAlternateURLGroups))
+	}
+
+	seenGroupIDs := make(map[int64]struct{}, len(inputs))
+	seenNames := make(map[string]struct{}, len(inputs))
+	for index, input := range inputs {
+		field := fmt.Sprintf("alternate_urls[%d]", index)
+
+		if !isCore {
+			if input.GroupID == 0 {
+				return invalid(field+".group_id", "Only Kaeru Core can create alternate URL groups.")
+			}
+			if _, exists := knownGroups[input.GroupID]; !exists {
+				return invalid(field+".group_id", "Alternate URL groups must be ones Kaeru Core has defined.")
+			}
+		} else {
+			name := strings.TrimSpace(input.Group)
+			if name == "" {
+				return invalid(field+".group", "Give every alternate URL a group.")
+			}
+			if name != input.Group || len(input.Group) > maxAlternateURLGroupName {
+				return invalid(field+".group", fmt.Sprintf("Alternate URL group names must be at most %d characters without leading or trailing whitespace.", maxAlternateURLGroupName))
+			}
+			// Group names identify a group to administrators, so they are
+			// compared without regard to case.
+			lowered := strings.ToLower(name)
+			if _, exists := seenNames[lowered]; exists {
+				return invalid(field+".group", "Alternate URL group names must be unique.")
+			}
+			seenNames[lowered] = struct{}{}
+			if input.GroupID != 0 {
+				if _, exists := knownGroups[input.GroupID]; !exists {
+					return invalid(field+".group_id", "Alternate URL groups must be ones Kaeru Core has defined.")
+				}
+			}
+		}
+
+		if input.GroupID != 0 {
+			if _, exists := seenGroupIDs[input.GroupID]; exists {
+				return invalid(field+".group_id", "Each alternate URL group can only appear once.")
+			}
+			seenGroupIDs[input.GroupID] = struct{}{}
+		}
+
+		if err := validateHTTPURL("Alternate URL", input.URL, true); err != nil {
+			return invalid(field+".url", err.Error())
+		}
+	}
+
+	return nil
+}
+
+// validateHTTPURL checks a URL, naming the field in every message so the text
+// can be shown to an administrator as it is.
+func validateHTTPURL(label string, value string, optional bool) error {
 	if value == "" && optional {
 		return nil
 	}
 	if value == "" {
-		return fmt.Errorf("is required")
+		return fmt.Errorf("%s is required.", label)
 	}
 	if len(value) > maxURLLength {
-		return fmt.Errorf("must be at most %d characters", maxURLLength)
+		return fmt.Errorf("%s must be at most %d characters.", label, maxURLLength)
 	}
 	if value != strings.TrimSpace(value) {
-		return fmt.Errorf("must not contain leading or trailing whitespace")
+		return fmt.Errorf("%s must not contain leading or trailing whitespace.", label)
 	}
 
 	parsed, err := url.ParseRequestURI(value)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return fmt.Errorf("must be an absolute HTTP or HTTPS URL")
+		return fmt.Errorf("%s must be an absolute HTTP or HTTPS URL.", label)
 	}
 	if parsed.User != nil || parsed.Fragment != "" {
-		return fmt.Errorf("must not include user information or a fragment")
+		return fmt.Errorf("%s must not include user information or a fragment.", label)
 	}
 
 	return nil

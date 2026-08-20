@@ -22,6 +22,10 @@ const (
 	maxServiceRoles  = 100
 	maxRoleKeyLength = 64
 	maxRoleName      = 128
+
+	maxBackupOptions           = 50
+	maxBackupOptionName        = 128
+	maxBackupOptionDescription = 512
 )
 
 var roleKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
@@ -140,16 +144,20 @@ func (manager *ServiceManager) Update(ctx context.Context, serviceID string, inp
 		return ServiceDetails{}, err
 	}
 	if service.ServiceType == CoreServiceType && input.DefaultRoleKey != nil {
-		return ServiceDetails{}, &ValidationError{Field: "default_role_key", Message: "Kaeru Core must default to No Access"}
+		return ServiceDetails{}, &ValidationError{Field: "default_role_key", Message: "Kaeru Core must default to No Access."}
 	}
 	if service.ServiceType == CoreServiceType {
 		input.PublicURL = strings.TrimRight(input.PublicURL, "/")
 		parsed, parseErr := url.ParseRequestURI(input.PublicURL)
 		if parseErr != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
-			return ServiceDetails{}, &ValidationError{Field: "public_url", Message: "Kaeru Core public URL must be an HTTP or HTTPS origin without a path, query, or fragment"}
+			return ServiceDetails{}, &ValidationError{Field: "public_url", Message: "The Kaeru Core Application URL must be an HTTP or HTTPS origin without a path, query, or fragment."}
 		}
 	}
-	if err := ValidateServiceUpdate(input, service.Roles); err != nil {
+	knownGroups := make(map[int64]string, len(service.AlternateURLs))
+	for _, alternate := range service.AlternateURLs {
+		knownGroups[alternate.GroupID] = alternate.Group
+	}
+	if err := ValidateServiceUpdate(input, service.Roles, service.ServiceType == CoreServiceType, knownGroups); err != nil {
 		return ServiceDetails{}, err
 	}
 	if service.ServiceType == CoreServiceType && !slices.Equal(
@@ -173,12 +181,11 @@ func sortedRoleGroups(mappings []ServiceRoleMapping, roleKey string) []string {
 	return slices.Compact(groups)
 }
 
-func ValidateServiceUpdate(input UpdateServiceInput, roles []ServiceRole) error {
-	nativeAppsURL := ""
-	if input.NativeAppsURL != nil {
-		nativeAppsURL = *input.NativeAppsURL
+func ValidateServiceUpdate(input UpdateServiceInput, roles []ServiceRole, isCore bool, knownGroups map[int64]string) error {
+	if err := ValidatePublicURL(input.PublicURL); err != nil {
+		return err
 	}
-	if err := ValidateAccessURLs(input.PublicURL, nativeAppsURL); err != nil {
+	if err := ValidateAlternateURLs(input.AlternateURLs, isCore, knownGroups); err != nil {
 		return err
 	}
 
@@ -190,11 +197,11 @@ func ValidateServiceUpdate(input UpdateServiceInput, roles []ServiceRole) error 
 	}
 	if input.DefaultRoleKey != nil {
 		if _, exists := activeRoles[*input.DefaultRoleKey]; !exists {
-			return invalid("default_role_key", "must identify an active role supplied by the service")
+			return invalid("default_role_key", "The default user role must be one the service provides.")
 		}
 	}
 	if len(input.RoleMappings) > maxRoleMappings {
-		return invalid("role_mappings", fmt.Sprintf("must contain at most %d mappings", maxRoleMappings))
+		return invalid("role_mappings", fmt.Sprintf("There can be at most %d role mappings.", maxRoleMappings))
 	}
 
 	mappedRoles := make(map[string]struct{}, len(input.RoleMappings))
@@ -202,34 +209,79 @@ func ValidateServiceUpdate(input UpdateServiceInput, roles []ServiceRole) error 
 	for mappingIndex, mapping := range input.RoleMappings {
 		field := fmt.Sprintf("role_mappings[%d]", mappingIndex)
 		if _, exists := activeRoles[mapping.RoleKey]; !exists {
-			return invalid(field+".role_key", "must identify an active role supplied by the service")
+			return invalid(field+".role_key", "Each role mapping must use a role the service provides.")
 		}
 		if _, exists := mappedRoles[mapping.RoleKey]; exists {
-			return invalid(field+".role_key", "must be unique within the configuration")
+			return invalid(field+".role_key", "Each role can only have one role mapping.")
 		}
 		mappedRoles[mapping.RoleKey] = struct{}{}
 		if len(mapping.OIDCGroups) == 0 {
-			return invalid(field+".oidc_groups", "must contain at least one OIDC group")
+			return invalid(field+".oidc_groups", "Give every role mapping at least one OIDC group.")
 		}
 
 		groups := make(map[string]struct{}, len(mapping.OIDCGroups))
 		for groupIndex, group := range mapping.OIDCGroups {
 			groupField := fmt.Sprintf("%s.oidc_groups[%d]", field, groupIndex)
 			if strings.TrimSpace(group) == "" {
-				return invalid(groupField, "must not be empty")
+				return invalid(groupField, "OIDC group names must not be empty.")
 			}
 			if group != strings.TrimSpace(group) || len(group) > maxOIDCGroupName {
-				return invalid(groupField, "must be at most 255 characters without leading or trailing whitespace")
+				return invalid(groupField, "OIDC group names must be at most 255 characters without leading or trailing whitespace.")
 			}
 			if _, exists := groups[group]; exists {
-				return invalid(groupField, "must be unique within the role mapping")
+				return invalid(groupField, "OIDC group names must be unique within a role mapping.")
 			}
 			groups[group] = struct{}{}
 			totalGroups++
 			if totalGroups > maxOIDCGroups {
-				return invalid("role_mappings", fmt.Sprintf("must contain at most %d OIDC groups", maxOIDCGroups))
+				return invalid("role_mappings", fmt.Sprintf("There can be at most %d OIDC groups across all role mappings.", maxOIDCGroups))
 			}
 		}
+	}
+
+	return nil
+}
+
+// ValidateBackupOptions checks a service-supplied backup catalog. Services are
+// independently developed, so their responses are treated as untrusted input.
+func ValidateBackupOptions(options []BackupOption) error {
+	if len(options) == 0 {
+		return fmt.Errorf("backup options must contain at least one option")
+	}
+	if len(options) > maxBackupOptions {
+		return fmt.Errorf("backup options must contain at most %d options", maxBackupOptions)
+	}
+
+	identifiers := make(map[int32]struct{}, len(options))
+	names := make(map[string]struct{}, len(options))
+	defaults := 0
+	for index, option := range options {
+		if option.ID < 1 {
+			return fmt.Errorf("options[%d].id must be greater than zero", index)
+		}
+		if _, exists := identifiers[option.ID]; exists {
+			return fmt.Errorf("options[%d].id must be unique", index)
+		}
+		identifiers[option.ID] = struct{}{}
+
+		name := strings.TrimSpace(option.Option)
+		if name == "" || name != option.Option || len(option.Option) > maxBackupOptionName {
+			return fmt.Errorf("options[%d].option must be between 1 and %d characters without surrounding whitespace", index, maxBackupOptionName)
+		}
+		if _, exists := names[option.Option]; exists {
+			return fmt.Errorf("options[%d].option must be unique", index)
+		}
+		names[option.Option] = struct{}{}
+
+		if len(option.Description) > maxBackupOptionDescription {
+			return fmt.Errorf("options[%d].description must be at most %d characters", index, maxBackupOptionDescription)
+		}
+		if option.Default {
+			defaults++
+		}
+	}
+	if defaults > 1 {
+		return fmt.Errorf("backup options must not mark more than one option as the default")
 	}
 
 	return nil

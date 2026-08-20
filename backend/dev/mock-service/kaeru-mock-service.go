@@ -26,6 +26,23 @@ type roleCatalog struct {
 	Roles []serviceRole `json:"roles"`
 }
 
+type backupOption struct {
+	ID          int32  `json:"id"`
+	Option      string `json:"option"`
+	Default     bool   `json:"default"`
+	Description string `json:"description"`
+}
+
+type backupOptionCatalog struct {
+	Options []backupOption `json:"options"`
+}
+
+var mockBackupOptions = []backupOption{
+	{ID: 1, Option: "Full Backup", Default: true, Description: "Database, configuration, and all stored files."},
+	{ID: 2, Option: "Database Only", Description: "Database contents without any stored files."},
+	{ID: 3, Option: "Configuration Only", Description: "Service configuration without data."},
+}
+
 var mockRoles = []serviceRole{
 	{Key: "viewer", Name: "Viewer", Priority: 10},
 	{Key: "editor", Name: "Editor", Priority: 50},
@@ -80,7 +97,7 @@ func newHandler() http.Handler {
 	router := http.NewServeMux()
 	var available atomic.Bool
 	available.Store(true)
-	router.HandleFunc("GET /api/v1/health", func(response http.ResponseWriter, _ *http.Request) {
+	router.HandleFunc("GET /api/core/v1/health", func(response http.ResponseWriter, _ *http.Request) {
 		writeJSON(response, http.StatusOK, struct {
 			Available bool `json:"available"`
 		}{Available: available.Load()})
@@ -100,10 +117,10 @@ func newHandler() http.Handler {
 			Available bool `json:"available"`
 		}{Available: available.Load()})
 	})
-	router.HandleFunc("GET /api/v1/system/roles", func(response http.ResponseWriter, _ *http.Request) {
+	router.HandleFunc("GET /api/core/v1/system/roles", func(response http.ResponseWriter, _ *http.Request) {
 		writeJSON(response, http.StatusOK, roleCatalog{Roles: mockRoles})
 	})
-	router.HandleFunc("GET /api/v1/system/icon", func(response http.ResponseWriter, _ *http.Request) {
+	router.HandleFunc("GET /api/core/v1/system/icon", func(response http.ResponseWriter, _ *http.Request) {
 		icon, err := loadKaeruIcon()
 		if err != nil {
 			http.Error(response, "Kaeru development icon is unavailable", http.StatusInternalServerError)
@@ -116,7 +133,48 @@ func newHandler() http.Handler {
 		_, _ = response.Write(icon)
 	})
 
+	router.HandleFunc("GET /api/core/v1/backup/options", func(response http.ResponseWriter, _ *http.Request) {
+		writeJSON(response, http.StatusOK, backupOptionCatalog{Options: mockBackupOptions})
+	})
+	router.HandleFunc("GET /api/core/v1/backup", func(response http.ResponseWriter, request *http.Request) {
+		option, found := findBackupOption(request.URL.Query().Get("option"))
+		if !found {
+			http.Error(response, "option must identify a published backup option", http.StatusBadRequest)
+			return
+		}
+		archive := fmt.Sprintf("kaeru-mock-service backup\noption: %s\n", option.Option)
+		response.Header().Set("Content-Type", "application/gzip")
+		response.Header().Set("Content-Disposition", `attachment; filename="kaeru-mock-service-backup.tar.gz"`)
+		response.WriteHeader(http.StatusOK)
+		_, _ = response.Write([]byte(archive))
+	})
+	router.HandleFunc("POST /api/core/v1/backup", func(response http.ResponseWriter, request *http.Request) {
+		option, found := findBackupOption(request.URL.Query().Get("option"))
+		if !found {
+			http.Error(response, "option must identify a published backup option", http.StatusBadRequest)
+			return
+		}
+		writeJSON(response, http.StatusAccepted, struct {
+			Status string `json:"status"`
+			Option string `json:"option"`
+		}{Status: "started", Option: option.Option})
+	})
+
 	return router
+}
+
+// findBackupOption resolves the option query parameter to a published option.
+func findBackupOption(raw string) (backupOption, bool) {
+	identifier, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil {
+		return backupOption{}, false
+	}
+	for _, option := range mockBackupOptions {
+		if option.ID == int32(identifier) {
+			return option, true
+		}
+	}
+	return backupOption{}, false
 }
 
 func loadKaeruIcon() ([]byte, error) {

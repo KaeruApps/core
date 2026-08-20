@@ -32,7 +32,7 @@ func NewIconClient(timeout time.Duration) *IconClient {
 }
 
 func (client *IconClient) Fetch(ctx context.Context, internalURL string) (registry.FetchedServiceIcon, error) {
-	endpoint, err := url.JoinPath(internalURL, "/api/v1/system/icon")
+	endpoint, err := url.JoinPath(internalURL, "/api/core/v1/system/icon")
 	if err != nil {
 		return registry.FetchedServiceIcon{}, fmt.Errorf("build service icon URL: %w", err)
 	}
